@@ -17,10 +17,12 @@ texture change and the prepared `texture.src` lags the source; Rescan rides a hi
 any GM window's press reaches the active GM; a token found wearing a look-shaped image with no flags
 is recognised as that look when the base file exists (dnd5e's `revertOriginalForm` hands the stored
 image back and drops every flag); and Restore All pauses the whole world, not one client, since the
-MCP's `configure-modules.mjs` page is a GM client that runs the module. Not released: 1.0.0 is the
-manifest's version and the first release is the user's call, then the prod install through Foundry's
-installer (`register-module.mjs`, a new module needs `/setup`'s `installPackage`, never a world
-bounce) and `configure-modules.mjs --enable`. The sandbox was left with the module enabled and
+MCP's `configure-modules.mjs` page is a GM client that runs the module. **Released as 1.0.0 on
+2026-10-15** (tag `v1.0.0` at 110d743, the zip and `module.json` on the release) and installed on
+prod the same day through Foundry's installer (`register-module.mjs` from the GitHub manifest, a new
+module needs `/setup`'s `installPackage`, never a world bounce), then `configure-modules.mjs
+--enable` and a second installer run as the bounce; the DM's own window was the one connection
+dropped. The sandbox runs the same bytes as a dev copy (`--local`). The sandbox was left with the module enabled and
 unpaused, Party Camp active, the walk's scenes deleted, no combats and no Token Art flags on any
 token; the walk's art stays under `assets/tokenart-walk/` (nine small PNGs: `x.png` and its four
 looks, and a `wild/` folder) for trying the module. The BTB test actors the walk borrowed were gone
