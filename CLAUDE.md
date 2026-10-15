@@ -9,9 +9,9 @@ build step, no patching beyond one manual wrap, no libWrapper, no socketlib, MIT
 **State (2026-10-15).** Built from the plan on 2026-10-15; `npm run verify` green (58 tests);
 deployed to the sandbox with the dnd5e MCP's `deploy-house-module.mjs --local`, registered there by a
 restart of the local Foundry process (a new module's folder is scanned at process boot), enabled, and
-walked: steps 1–11 of `tools/README.md` green and step 12's Restore All green (the results are under
-the list); **owed: the re-run of step 12's "then disabled" half** on the world-pause build, which a
-By the Books battery on the sandbox kept from running. The walk changed the build four times:
+walked: all twelve steps of `tools/README.md` green (the results are under the list; step 12's
+"then disabled" half failed on the first build and passed on the world-pause build, re-run after the
+By the Books battery that held the sandbox meanwhile). The walk changed the build four times:
 decisions read the token's stored image (`_source`), never the prepared one, since Foundry animates a
 texture change and the prepared `texture.src` lags the source; Rescan rides a hidden world setting so
 any GM window's press reaches the active GM; a token found wearing a look-shaped image with no flags
@@ -20,10 +20,11 @@ image back and drops every flag); and Restore All pauses the whole world, not on
 MCP's `configure-modules.mjs` page is a GM client that runs the module. Not released: 1.0.0 is the
 manifest's version and the first release is the user's call, then the prod install through Foundry's
 installer (`register-module.mjs`, a new module needs `/setup`'s `installPackage`, never a world
-bounce) and `configure-modules.mjs --enable`. The sandbox was left with the module enabled, the
-walk's art under `assets/tokenart-walk/` (nine small PNGs), two scenes `Token Art Walk A` (active)
-and `Token Art Walk B`, each with a BTB Test Fighter token wearing the ready look: the cleanup
-(delete the two scenes, activate Party Camp) waits for the battery to end.
+bounce) and `configure-modules.mjs --enable`. The sandbox was left with the module enabled and
+unpaused, Party Camp active, the walk's scenes deleted, no combats and no Token Art flags on any
+token; the walk's art stays under `assets/tokenart-walk/` (nine small PNGs: `x.png` and its four
+looks, and a `wild/` folder) for trying the module. The BTB test actors the walk borrowed were gone
+by then, torn down by the battery, so nothing of theirs needed restoring.
 
 ## The decisions (taken 2026-10-15, the plan's D1–D4)
 

@@ -60,6 +60,7 @@ errors, nothing written from it. 11 the linked character's token on the unviewed
 back with the viewed one. 12 Restore All put both tokens at the base with no flags on any scene; the
 first build paused the pressing client only, and the dnd5e MCP's `configure-modules.mjs`, joining as
 a GM to write the disable, ran the module on its own page and dressed the tokens again before the
-bounce. Fixed the same day with a world-wide pause (Restore All sets it, Rescan clears it), deployed
-to the sandbox; **the re-run of step 12's second half is owed**: a By the Books battery took the
-sandbox before it could run.
+bounce. Fixed the same day with a world-wide pause (Restore All sets it, Rescan clears it) and re-run
+green once the battery had ended: Restore All left both tokens at `x.png` with no flags and the pause
+on; `configure-modules.mjs --disable` joined as a GM and wrote nothing; after the bounce both tokens
+still wore `x.png`; re-enabled and bounced, `api.rescan()` cleared the pause.
