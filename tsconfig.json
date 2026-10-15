@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+
+    // TYPE-CHECK THE SHIPPED SOURCE AS-IS: there is no build step. `checkJs` stays false globally
+    // and files opt in with `// @ts-check`: scripts/decide/ (pure, no Foundry) does. Foundry's and
+    // dnd5e's globals are `any` (types/foundry.d.ts), so an opted-in file gets its own logic
+    // checked and the platform left open. By the Books' configuration, copied.
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+
+    "strict": true,
+    "noImplicitAny": false,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["scripts/**/*.js", "tools/**/*.mjs", "tests/**/*.js", "types/**/*.d.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "fvtt-mod-tokenart",
+  "private": true,
+  "type": "module",
+  "description": "Development tooling for Token Art. NOTHING HERE SHIPS — the module is plain ES modules loaded straight from scripts/, with no build step.",
+  "scripts": {
+    "verify": "npm run check && npm run typecheck && npm run manifest && npm run test",
+    "check": "biome check --error-on-warnings .",
+    "check:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "manifest": "node tools/check-manifest.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest --watch"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "@types/node": "^26.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "~3.2.6"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "author": "Txpple",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Txpple/fvtt-mod-tokenart.git"
+  }
+}
