@@ -60,7 +60,9 @@ assets/tokens/
   at rest is ready. A look whose file is missing, or whose switch is off, hands over to the next.
 - **Dead is one rule for everyone.** A player character at 0 Hit Points is dying by the book, not
   dead; this module shows the dead look anyway, as Combat Plus's Auto-Defeated stamps the overlay.
-  Turn the *Dead look* switch off if your table would rather not.
+  Turn the *Dead look* switch off if your table would rather not. Who writes the Dead status this
+  look also reads (dnd5e, By the Books, Combat Plus) is written once for the family in
+  [contracts/dead.md](https://github.com/Txpple/fvtt-suite-openroll5e/blob/main/contracts/dead.md).
 - **Derivation runs one way,** base to looks. A token placed as `walking-dead.webp` has the base
   `walking-dead.webp` and the looks `walking-dead-dead.webp` and so on. The module reads a base out
   of a look's name in one case only, below, and only when that base file exists.
