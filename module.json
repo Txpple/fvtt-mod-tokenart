@@ -2,7 +2,7 @@
   "id": "fvtt-mod-tokenart",
   "title": "Open Roll 5e: Token Art",
   "description": "Gives every token the look of its state: ready, in combat, prone or dead, each a file named beside the base art (goblin.webp, goblin-ready.webp, goblin-combat.webp, goblin-prone.webp, goblin-dead.webp), with nothing to configure. A look that is missing falls through to the next one that applies, and the base art is the floor.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "authors": [
     {
       "name": "Matthew Sippel"
@@ -29,7 +29,7 @@
   },
   "url": "https://github.com/Txpple/fvtt-mod-tokenart",
   "manifest": "https://github.com/Txpple/fvtt-mod-tokenart/releases/latest/download/module.json",
-  "download": "https://github.com/Txpple/fvtt-mod-tokenart/releases/download/v1.0.0/fvtt-mod-tokenart.zip",
+  "download": "https://github.com/Txpple/fvtt-mod-tokenart/releases/download/v1.0.1/fvtt-mod-tokenart.zip",
   "readme": "https://github.com/Txpple/fvtt-mod-tokenart#readme",
   "license": "MIT"
 }

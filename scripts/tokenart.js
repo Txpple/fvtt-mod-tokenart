@@ -23,11 +23,14 @@ import {
   SEPARATORS,
   baseOf,
   lookCandidate,
+  lookCandidatesOutside,
   lookPaths,
   restoreUpdate,
   stateOf,
+  stillCurrent,
   tokenUpdate,
   winningLook,
+  withDeletionOperators,
   withoutLooks
 } from "./decide/looks.js";
 
@@ -150,13 +153,17 @@ function stateFor(tokenDoc) {
   });
 }
 
-/** An actor's tokens: linked, every token of its on every scene; unlinked, the one behind it. */
+/**
+ * An actor's tokens: a synthetic actor's is the one behind it; a world actor's are every token of
+ * its on every scene, linked (they share its data) or unlinked (their synthetic actors inherit what
+ * their deltas do not override, and Foundry fires no hook of theirs when the world actor changes).
+ */
 function tokensOf(actor) {
   if (!actor) return [];
   if (actor.isToken) return actor.token ? [actor.token] : [];
   const out = [];
   for (const scene of game.scenes) {
-    for (const t of scene.tokens) if (t.actorId === actor.id && t.actorLink) out.push(t);
+    for (const t of scene.tokens) if (t.actorId === actor.id) out.push(t);
   }
   return out;
 }
@@ -174,8 +181,22 @@ function stored(tokenDoc) {
   const source = tokenDoc._source ?? tokenDoc;
   const src = source.texture?.src ?? tokenDoc.texture?.src ?? "";
   const ring = source.ring ?? tokenDoc.ring;
-  const subject = ring?.enabled ? ring.subject?.texture || null : null;
-  return { src, subject };
+  // `subject` is the ring subject in play (the ring on and an image set); `subjectSet` is the image
+  // set whether or not the ring is on, which Restore All puts back so a ring switched on later
+  // does not show a look the module had stored there.
+  const subjectSet = ring?.subject?.texture || null;
+  const subject = ring?.enabled ? subjectSet : null;
+  return { src, subject, subjectSet };
+}
+
+/**
+ * An update as this Foundry wants it: on 14 each legacy `-=` deletion key becomes a forced-deletion
+ * operator (14 accepts the legacy key with a warning on every write and 16 drops it); on 13, which
+ * has no operators, the legacy key stays.
+ */
+function forWrite(update) {
+  const Deletion = foundry.data?.operators?.ForcedDeletion;
+  return typeof Deletion === "function" ? withDeletionOperators(update, () => new Deletion()) : update;
 }
 
 /** The update a token needs now, with a note for the `tokenart.changed` hook, or null. */
@@ -195,7 +216,9 @@ async function planFor(tokenDoc) {
   let subjectBase = null;
   let subjectLookSrc = null;
   if (ringSubject) {
-    subjectBase = baseOf({ src: ringSubject, flags: { base: flags.subject } }, sep);
+    // The subject's base is resolved as the image's is, the look-candidate probe included: dnd5e's
+    // revert of a transform hands the stored subject back with the flags gone, like the image.
+    subjectBase = await resolveBase(ringSubject, { base: flags.subject, look: flags.look }, sep);
     if (look && probeable(subjectBase) && (await looksAvailable(subjectBase))[look]) {
       subjectLookSrc = lookPaths(subjectBase, sep)[look];
     }
@@ -240,9 +263,19 @@ async function applyTokensNow(tokens) {
   }
   let changed = 0;
   for (const [scene, { updates, notes }] of byScene) {
+    // Planning awaits probes; the seat or the pause may have changed meanwhile (Restore All sets
+    // the pause, then reads the tokens), and a plan made before either is not written after.
+    if (!isActiveGM() || isPaused()) break;
+    // Nor is a plan for a token deleted meanwhile (it would fail the whole batch) or for one whose
+    // image someone else changed meanwhile (that change's own event re-plans it).
+    const live = stillCurrent(updates, notes, id => {
+      const t = scene.tokens.get(id);
+      return t ? stored(t).src : null;
+    }).map(forWrite);
+    if (!live.length) continue;
     try {
-      await scene.updateEmbeddedDocuments("Token", updates, { tokenart: notes });
-      changed += updates.length;
+      await scene.updateEmbeddedDocuments("Token", live, { tokenart: notes });
+      changed += live.length;
     } catch (err) {
       console.error(`${TITLE} | could not update tokens on ${scene.name}`, err);
     }
@@ -250,13 +283,25 @@ async function applyTokensNow(tokens) {
   return changed;
 }
 
-/** Every token on every scene, once: at ready, after a rescan, and when this client becomes the active GM. */
+/**
+ * Every token on every scene, once: at ready, after a rescan, and when this client becomes the
+ * active GM. A call while a pass is running asks for one more pass after it, so a Rescan pressed
+ * mid-reconcile (its cache clear already done) still reaches the tokens the running pass had
+ * planned with the old answers; the promise returned is the whole run's.
+ */
 let reconciling = null;
+let reconcileAgain = false;
 function reconcileAll() {
-  if (reconciling) return reconciling;
+  if (reconciling) {
+    reconcileAgain = true;
+    return reconciling;
+  }
   reconciling = (async () => {
     let changed = 0;
-    for (const scene of game.scenes) changed += await applyTokens(scene.tokens.contents);
+    do {
+      reconcileAgain = false;
+      for (const scene of game.scenes) changed += await applyTokens(scene.tokens.contents);
+    } while (reconcileAgain);
     return changed;
   })().finally(() => {
     reconciling = null;
@@ -325,16 +370,20 @@ const api = {
       if (!yes) return 0;
     }
     await game.settings.set(MODULE_ID, S.paused, true);
+    // A batch this client had in flight finishes (and, paused now, writes nothing) before the
+    // tokens are read, so a look it landed a moment ago is seen and taken off.
+    await chain;
+    const sep = separator();
     let restored = 0;
     for (const scene of game.scenes) {
       const updates = [];
       const notes = {};
       for (const t of scene.tokens) {
         const flags = t.flags?.[MODULE_ID] ?? {};
-        const { src, subject } = stored(t);
-        const update = restoreUpdate({ id: t.id, src, subject, flags });
+        const { src, subjectSet } = stored(t);
+        const update = restoreUpdate({ id: t.id, src, subject: subjectSet, flags }, sep);
         if (!update) continue;
-        updates.push(update);
+        updates.push(forWrite(update));
         notes[t.id] = { from: src, to: update["texture.src"] ?? src, look: null };
       }
       if (!updates.length) continue;
@@ -487,7 +536,21 @@ Hooks.once("setup", () => {
   proto.getTokenImages = async function (...args) {
     const images = await original.apply(this, args);
     try {
-      return withoutLooks(images, separator());
+      const sep = separator();
+      const kept = withoutLooks(images, sep);
+      // A look of a base the wildcard never matched (`goblin-*.webp` lists `goblin-dead.webp` but not
+      // `goblin.webp`): the name alone cannot tell it from a base called `walking-dead.webp`, so the
+      // server is asked whether the candidate base exists, once, through the same cache.
+      // A GM client asks; a player's client, which cannot place a token, sends no request.
+      const drop = new Set();
+      if (game.user?.isGM) {
+        await Promise.all(
+          lookCandidatesOutside(kept, sep).map(async ({ path, base }) => {
+            if (probeable(base) && (await fileExists(base))) drop.add(path);
+          })
+        );
+      }
+      return drop.size ? kept.filter(p => !drop.has(p)) : kept;
     } catch (err) {
       console.error(`${TITLE} | wildcard filter failed`, err);
       return images;
@@ -521,11 +584,19 @@ Hooks.on(
   whenActiveGM(doc => applyTokens([doc]))
 );
 
+// A scene that arrives with its tokens (duplicated, imported from a compendium or an adventure)
+// fires no createToken for them.
+Hooks.on(
+  "createScene",
+  whenActiveGM(scene => applyTokens(scene.tokens?.contents ?? []))
+);
+
 Hooks.on("updateToken", (doc, changed, options) => {
   // The module's own write: tell every client what changed, and leave it alone.
   const note = options?.tokenart?.[doc.id];
   if (note) {
-    Hooks.callAll("tokenart.changed", doc, note);
+    // The hook is for a changed image; a write that only sets the flags straight says nothing.
+    if (note.from !== note.to) Hooks.callAll("tokenart.changed", doc, note);
     return;
   }
   if (!isActiveGM() || isPaused()) return;
@@ -583,6 +654,15 @@ Hooks.on(
 Hooks.on(
   "deleteCombatant",
   whenActiveGM(c => (c.token ? applyTokens([c.token]) : undefined))
+);
+// A combatant pointed at another token (Foundry remaps one whose token a replacement deleted, as
+// dnd5e's revert of an unlinked transform does): the token now in combat follows. The token it
+// left, if any, waits for its next event.
+Hooks.on(
+  "updateCombatant",
+  whenActiveGM((c, changed) =>
+    ("tokenId" in changed || "sceneId" in changed) && c.token ? applyTokens([c.token]) : undefined
+  )
 );
 Hooks.on(
   "createCombat",

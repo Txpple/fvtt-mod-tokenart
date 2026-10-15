@@ -26,7 +26,26 @@ dropped. The sandbox runs the same bytes as a dev copy (`--local`). The sandbox 
 unpaused, Party Camp active, the walk's scenes deleted, no combats and no Token Art flags on any
 token; the walk's art stays under `assets/tokenart-walk/` (nine small PNGs: `x.png` and its four
 looks, and a `wild/` folder) for trying the module. The BTB test actors the walk borrowed were gone
-by then, torn down by the battery, so nothing of theirs needed restoring.
+by then, torn down by the battery, so nothing of theirs needed restoring. **1.0.1 the same day**: a correctness review by a session that did not build it, with an independent second
+read beside it, found fifteen things, all fixed (`audits/review-2026-10-15.md` has each with its fix; the
+design points it left are the repo's issues #1–#4): the wildcard filter kept a look whose base the wildcard
+never matched (`goblin-*.webp` lists `goblin-dead.webp`, never `goblin.webp`; `lookCandidatesOutside` plus one
+cached probe of the candidate base, GM clients only, settles it); a change of the separator setting adopted a
+worn look as a new base (`baseOf` recognises the look the flags name under every separator); Restore All put
+the flagged base over an image the module never adopted (`restoreUpdate` restores only from the base's own
+looks); Restore All raced an in-flight batch (the seat and the pause are re-checked before each scene's write;
+`restoreAll` awaits the chain); a Rescan during a running reconcile was swallowed (`reconcileAll` queues one
+more pass); a stale plan overwrote a concurrent image change, and a token deleted meanwhile failed its scene's
+whole batch (`stillCurrent` drops both before the write); the ring subject dnd5e's revert hands back was
+adopted as a base of its own (`resolveBase` for the subject too), and Restore All with the ring off left the
+subject's look stored (`stored().subjectSet`); `updateCombatant` and `createScene` are heard; a world actor's
+unlinked tokens follow its edits; `tokenart.changed` fires only when the image changed; and every `-=` deletion
+key becomes a `ForcedDeletion` operator on Foundry 14, which logs a compatibility warning on every legacy key
+and drops them in 16 (`withDeletionOperators`; 13 keeps the keys). `npm run verify` green (73 tests). The
+three live checks owed (a back-to-base swap, Restore All then Rescan, the wildcard with an unmatched base) ran
+green on the sandbox through a GM page script with the console captured, zero deletion-key warnings; the
+check's first run taught that a fresh NPC with no Hit Points sits at 0 and wears its dead look (D1). Released
+as **1.0.1** (tag `v1.0.1`, both assets on the release); the sandbox carries the same bytes (`--local`).
 
 ## The decisions (taken 2026-10-15, the plan's D1–D4)
 

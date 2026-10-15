@@ -7,13 +7,16 @@ import {
   baseOf,
   isLookOf,
   lookCandidate,
+  lookCandidatesOutside,
   lookPath,
   lookPaths,
   restoreUpdate,
   splitPath,
   stateOf,
+  stillCurrent,
   tokenUpdate,
   winningLook,
+  withDeletionOperators,
   withoutLooks
 } from "../scripts/decide/looks.js";
 
@@ -117,6 +120,28 @@ describe("baseOf — adoption against recognition", () => {
     expect(baseOf({ src: "t/owl_prone.webp", flags: { base: "t/owl.webp" } })).toBe("t/owl_prone.webp");
     expect(baseOf({ src: "t/owl_prone.webp", flags: { base: "t/owl.webp" } }, "_")).toBe("t/owl.webp");
   });
+  it("the look the flags name is the module's own write, recognised after the separator changes", () => {
+    // Dressed goblin_dead.webp under "_", the table switches to "-": still the dead look of goblin.webp.
+    expect(baseOf({ src: "t/owl_prone.webp", flags: { base: "t/owl.webp", look: "prone" } })).toBe("t/owl.webp");
+    expect(baseOf({ src: "t/owl.prone.webp", flags: { base: "t/owl.webp", look: "prone" } }, "_")).toBe("t/owl.webp");
+    // The flags must name that look; another look's path under another separator is a hand change.
+    expect(baseOf({ src: "t/owl_dead.webp", flags: { base: "t/owl.webp", look: "prone" } })).toBe("t/owl_dead.webp");
+  });
+  it("switching the separator while a look is worn takes the token back to its base, not to a new base", () => {
+    const B = "t/goblin.webp";
+    const dressed = tokenUpdate(
+      { id: "a", src: B, flags: {} },
+      { base: B, look: "dead", lookSrc: "t/goblin-dead.webp" }
+    );
+    const now = { id: "a", src: dressed["texture.src"], flags: { base: B, look: "dead" } };
+    // Under "_" no goblin_dead.webp exists; the base is still goblin.webp and the token returns to it.
+    expect(baseOf(now, "_")).toBe(B);
+    expect(tokenUpdate(now, { base: B, look: null })).toEqual({
+      _id: "a",
+      "texture.src": B,
+      "flags.fvtt-mod-tokenart.-=look": null
+    });
+  });
   it("an empty image is an empty base", () => {
     expect(baseOf({ src: "", flags: {} })).toBe("");
     expect(baseOf({ src: null, flags: { base: "t/owl.webp" } })).toBe("");
@@ -200,6 +225,35 @@ describe("withoutLooks — a wildcard never draws a look file", () => {
   it("tolerates junk", () => {
     expect(withoutLooks(null)).toEqual([]);
     expect(withoutLooks(["a.webp", 3, undefined])).toEqual(["a.webp"]);
+  });
+});
+
+describe("lookCandidatesOutside — the look-shaped names a wildcard lists without their base", () => {
+  it("names the candidates whose base the wildcard did not match, for the server to confirm", () => {
+    // goblin-*.webp lists goblin-dead.webp but never goblin.webp: the name alone cannot settle it.
+    expect(lookCandidatesOutside(["g/goblin-1.webp", "g/goblin-dead.webp", "g/goblin-2.webp"])).toEqual([
+      { path: "g/goblin-dead.webp", base: "g/goblin.webp", look: "dead" }
+    ]);
+  });
+  it("leaves out a look whose base is in the list (withoutLooks settles those) and plain bases", () => {
+    expect(lookCandidatesOutside(["g/goblin-1.webp", "g/goblin-1-dead.webp"])).toEqual([]);
+    expect(lookCandidatesOutside(["g/goblin-1.webp", "g/goblin-2.webp"])).toEqual([]);
+  });
+  it("a name that merely ends in a look word is a candidate too; the probe decides", () => {
+    expect(lookCandidatesOutside(["z/walking-dead.webp"])).toEqual([
+      { path: "z/walking-dead.webp", base: "z/walking.webp", look: "dead" }
+    ]);
+  });
+  it("honours the separator, keeps the order and tolerates junk", () => {
+    expect(lookCandidatesOutside(["g_prone.webp", "g_1.webp", "g_ready.webp"], "_")).toEqual([
+      { path: "g_prone.webp", base: "g.webp", look: "prone" },
+      { path: "g_ready.webp", base: "g.webp", look: "ready" }
+    ]);
+    expect(lookCandidatesOutside(["g_prone.webp"], "-")).toEqual([]);
+    expect(lookCandidatesOutside(null)).toEqual([]);
+    expect(lookCandidatesOutside(["g-dead.webp", 3, undefined])).toEqual([
+      { path: "g-dead.webp", base: "g.webp", look: "dead" }
+    ]);
   });
 });
 
@@ -361,6 +415,29 @@ describe("restoreUpdate — back to base and forgotten", () => {
       [`flags.-=${FLAG_SCOPE}`]: null
     });
   });
+  it("an image the module never put there stays: only the flags go", () => {
+    // A token pasted while paused carries the flags of the one it was copied from; its image was then
+    // changed by hand, which nothing adopted. Restore All must not undo the hand change.
+    expect(restoreUpdate({ id: "a", src: "t/bear.webp", flags: { base: "t/g.webp", look: "dead" } })).toEqual({
+      _id: "a",
+      [`flags.-=${FLAG_SCOPE}`]: null
+    });
+    expect(
+      restoreUpdate({
+        id: "a",
+        src: "t/g-dead.webp",
+        subject: "t/other.webp",
+        flags: { base: "t/g.webp", look: "dead", subject: "t/s.webp" }
+      })
+    ).toEqual({ _id: "a", "texture.src": "t/g.webp", [`flags.-=${FLAG_SCOPE}`]: null });
+  });
+  it("a look worn under the previous separator still comes back", () => {
+    expect(restoreUpdate({ id: "a", src: "t/g_dead.webp", flags: { base: "t/g.webp", look: "dead" } }, "-")).toEqual({
+      _id: "a",
+      "texture.src": "t/g.webp",
+      [`flags.-=${FLAG_SCOPE}`]: null
+    });
+  });
 });
 
 describe("lookCandidate — the base a look-shaped name points at, for the server to confirm", () => {
@@ -383,5 +460,48 @@ describe("lookCandidate — the base a look-shaped name points at, for the serve
   it("agrees with isLookOf both ways", () => {
     const c = lookCandidate("t/giant-owl-combat.webp");
     expect(isLookOf("t/giant-owl-combat.webp", c.base)).toBe(c.look);
+  });
+});
+
+describe("stillCurrent — the plans still safe to write once planning is over", () => {
+  const notes = { a: { from: "t/a.png" }, b: { from: "t/b.png" }, c: { from: "t/c.png" } };
+  const updates = [
+    { _id: "a", "texture.src": "t/a-ready.png" },
+    { _id: "b", "texture.src": "t/b-ready.png" },
+    { _id: "c", "texture.src": "t/c-ready.png" }
+  ];
+  it("keeps a token that still wears what its plan started from", () => {
+    expect(stillCurrent(updates, notes, () => "t/a.png")).toEqual([updates[0]]);
+  });
+  it("drops a token deleted meanwhile (it would fail the whole batch)", () => {
+    const worn = { a: "t/a.png", b: null, c: "t/c.png" };
+    expect(stillCurrent(updates, notes, id => worn[id])).toEqual([updates[0], updates[2]]);
+  });
+  it("drops a token whose image someone else changed meanwhile (its own event re-plans it)", () => {
+    const worn = { a: "t/a.png", b: "t/bear.png", c: "t/c.png" };
+    expect(stillCurrent(updates, notes, id => worn[id])).toEqual([updates[0], updates[2]]);
+  });
+  it("drops a plan with no note", () => {
+    expect(stillCurrent([{ _id: "z" }], notes, () => "t/z.png")).toEqual([]);
+  });
+});
+
+describe("withDeletionOperators — Foundry 14's deletion operators for the legacy -= keys", () => {
+  const DEL = Symbol("ForcedDeletion");
+  it("turns a flag deletion into the key with an operator, the rest untouched", () => {
+    expect(
+      withDeletionOperators({ _id: "a", "texture.src": "t/g.webp", [`flags.${FLAG_SCOPE}.-=look`]: null }, () => DEL)
+    ).toEqual({ _id: "a", "texture.src": "t/g.webp", [`flags.${FLAG_SCOPE}.look`]: DEL });
+  });
+  it("turns the whole-scope deletion Restore All writes", () => {
+    expect(withDeletionOperators({ _id: "a", [`flags.-=${FLAG_SCOPE}`]: null }, () => DEL)).toEqual({
+      _id: "a",
+      [`flags.${FLAG_SCOPE}`]: DEL
+    });
+  });
+  it("makes a fresh operator per key and leaves a -= inside a value or a non-null value alone", () => {
+    let n = 0;
+    const out = withDeletionOperators({ "a.-=x": null, "b.-=y": null, "c-=d": null, "-=e": 1 }, () => ++n);
+    expect(out).toEqual({ "a.x": 1, "b.y": 2, "c-=d": null, "-=e": 1 });
   });
 });

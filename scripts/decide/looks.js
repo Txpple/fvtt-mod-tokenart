@@ -109,15 +109,21 @@ export function lookCandidate(path, separator = "-") {
  * A token's base: the one its flags remember when the image it wears is that base or one of its
  * looks (a snapshot restored while prone hands a prone look back, and that is a look, not a new
  * base); otherwise the image it wears, which is how a Token Config edit, a transform or a summon's
- * landing becomes the base.
- * @param {{ src?: string|null, flags?: { base?: string } }} token
+ * landing becomes the base. The look the flags name is recognised under every separator, so the
+ * module's own write survives a change of the separator setting: a token dressed `goblin-dead.webp`
+ * under "-" keeps the base `goblin.webp` when the table switches to "_", instead of adopting the
+ * dead look as a base of its own.
+ * @param {{ src?: string|null, flags?: { base?: string, look?: string } }} token
  * @param {string} [separator]
  * @returns {string}
  */
 export function baseOf({ src, flags }, separator = "-") {
   const known = flags?.base;
   const worn = src ?? "";
-  if (known && (worn === known || isLookOf(worn, known, separator))) return known;
+  if (!known) return worn;
+  if (worn === known || isLookOf(worn, known, separator)) return known;
+  const look = flags?.look;
+  if (look && SEPARATORS.some(s => lookPath(known, look, s) === worn)) return known;
   return worn;
 }
 
@@ -176,6 +182,26 @@ export function withoutLooks(paths, separator = "-") {
 }
 
 /**
+ * The look-shaped names in a wildcard list whose candidate base is not in the list, each with that
+ * base, for the caller to ask the server about. `goblin-*.webp` matches `goblin-dead.webp` but never
+ * `goblin.webp`, so `withoutLooks` alone cannot tell the goblin's dead look from a base called
+ * `walking-dead.webp`; one probe of the candidate base can. Order kept.
+ * @param {unknown} paths
+ * @param {string} [separator]
+ * @returns {{ path: string, base: string, look: string }[]}
+ */
+export function lookCandidatesOutside(paths, separator = "-") {
+  const list = Array.isArray(paths) ? paths.filter(p => typeof p === "string") : [];
+  /** @type {{ path: string, base: string, look: string }[]} */
+  const out = [];
+  for (const path of list) {
+    const candidate = lookCandidate(path, separator);
+    if (candidate && !list.includes(candidate.base)) out.push({ path, ...candidate });
+  }
+  return out;
+}
+
+/**
  * @typedef {object} TokenNow
  * @property {string} id
  * @property {string} src                      the image the token wears
@@ -228,17 +254,68 @@ export function tokenUpdate(current, target) {
 }
 
 /**
+ * The updates still safe to write once planning (which awaits the server) is over: the token must
+ * still exist, and still wear the image its plan started from. A token deleted meanwhile would
+ * fail the whole batch; one whose image someone else changed meanwhile is re-planned by that
+ * change's own event, never overwritten by the stale plan.
+ * @param {Record<string, unknown>[]} updates
+ * @param {Record<string, { from: string }>} notes   each update's note, by token id
+ * @param {(id: string) => string|null|undefined} wornNow   the image the token wears now; null when it is gone
+ * @returns {Record<string, unknown>[]}
+ */
+export function stillCurrent(updates, notes, wornNow) {
+  return updates.filter(u => {
+    const id = String(u._id);
+    const now = wornNow(id);
+    return now != null && now === notes[id]?.from;
+  });
+}
+
+/**
+ * The same update with each legacy `-=` deletion key (`flags.scope.-=look: null`) turned into the
+ * key it deletes carrying a deletion operator (`flags.scope.look: <operator>`), the form Foundry 14
+ * asks for (it accepts the legacy key with a warning on every write and drops it in 16). A caller
+ * on a Foundry without operators keeps the update as it is.
+ * @param {Record<string, unknown>} update
+ * @param {() => unknown} makeDeletion   a fresh deletion operator
+ * @returns {Record<string, unknown>}
+ */
+export function withDeletionOperators(update, makeDeletion) {
+  /** @type {Record<string, unknown>} */
+  const out = {};
+  for (const [key, value] of Object.entries(update)) {
+    const at = key.lastIndexOf("-=");
+    const legacy = at >= 0 && (at === 0 || key[at - 1] === ".") && value === null;
+    if (legacy) out[`${key.slice(0, at)}${key.slice(at + 2)}`] = makeDeletion();
+    else out[key] = value;
+  }
+  return out;
+}
+
+/**
  * The update that puts a token back at its base and forgets it: the step before the module is
- * disabled or uninstalled. Null for a token the module never touched.
+ * disabled or uninstalled. Null for a token the module never touched. The image goes back only
+ * from the base's own looks; an image the module never put there (a hand change its flags have not
+ * caught up with) stays, and only the flags go.
  * @param {TokenNow} current
+ * @param {string} [separator]
  * @returns {Record<string, unknown>|null}
  */
-export function restoreUpdate({ id, src, subject = null, flags = {} }) {
+export function restoreUpdate({ id, src, subject = null, flags = {} }, separator = "-") {
   if (flags.base === undefined && flags.look === undefined && flags.subject === undefined) return null;
   /** @type {Record<string, unknown>} */
   const u = {};
-  if (flags.base && src !== flags.base) u["texture.src"] = flags.base;
-  if (subject != null && flags.subject && subject !== flags.subject) u["ring.subject.texture"] = flags.subject;
+  if (flags.base && src !== flags.base && baseOf({ src, flags }, separator) === flags.base) {
+    u["texture.src"] = flags.base;
+  }
+  if (
+    subject != null &&
+    flags.subject &&
+    subject !== flags.subject &&
+    baseOf({ src: subject, flags: { base: flags.subject, look: flags.look } }, separator) === flags.subject
+  ) {
+    u["ring.subject.texture"] = flags.subject;
+  }
   u[`flags.-=${FLAG_SCOPE}`] = null;
   return { _id: id, ...u };
 }
