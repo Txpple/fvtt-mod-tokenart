@@ -62,13 +62,16 @@ assets/tokens/
   dead; this module shows the dead look anyway, as Combat Plus's Auto-Defeated stamps the overlay.
   Turn the *Dead look* switch off if your table would rather not.
 - **Derivation runs one way,** base to looks. A token placed as `walking-dead.webp` has the base
-  `walking-dead.webp` and the looks `walking-dead-dead.webp` and so on; the module never reads a
-  base out of a look's name.
+  `walking-dead.webp` and the looks `walking-dead-dead.webp` and so on. The module reads a base out
+  of a look's name in one case only, below, and only when that base file exists.
 - **Any image change by anyone else becomes the new base:** a Token Config edit, a dnd5e
   transform, By the Books' Wild Shape Art and Summon Art, the dnd5e MCP's `set-actor-art`. The
-  looks are re-derived from it. The one exception: a change that lands on one of the current base's
-  own look files is recognised as that look, so a module that stored a token's image while it was
-  prone and hands it back does not make the prone look the base.
+  looks are re-derived from it. Two exceptions, both so a stored image handed back stays a look: a
+  change that lands on one of the current base's own look files is recognised as that look; and a
+  token found wearing a look-shaped name with no record of its base (dnd5e's revert of a transform
+  hands the stored image back and drops the flags) is taken as that look when the base file exists
+  beside it, so `giant-owl-ready.webp` returns to `giant-owl.webp` instead of becoming a base of
+  its own. A `walking-dead.webp` beside no `walking.webp` is still a base.
 - **Wildcard tokens** (`goblin-*.webp`) never draw a look file: the module filters them out of the
   wildcard list, so `goblin-1-dead.webp` is left alone while `goblin-1.webp` is in it.
 - **Dynamic rings.** With the ring on and its own subject image set, the subject gets the same
@@ -76,8 +79,8 @@ assets/tokens/
   draws the ring from the token image, which is the only thing written.
 - **Video textures** (`.webm`) follow the same rule, and a query string (a Forge or S3 URL) is kept
   after the extension.
-- **New art uploaded mid-session:** press **Rescan** in the settings (or reload). The found files
-  are remembered per image until then.
+- **New art uploaded mid-session:** press **Rescan** in the settings, from any GM window (or
+  reload). The found files are remembered per image until then.
 
 ## Settings
 
@@ -90,8 +93,8 @@ assets/tokens/
 | Prone look | On | Wears the `-prone` image under the Prone condition. |
 | Dead look | On | Wears the `-dead` image at 0 Hit Points or with the Dead condition. |
 | Suffix separator | `-` | The character before the look word: `goblin-dead.webp`, `goblin_dead.webp` or `goblin.dead.webp`. |
-| Rescan token art | | Forgets which files were found and looks again. |
-| Restore every token to its base | | Puts every token back to its base image and forgets the looks; the step before disabling or uninstalling the module. The module stays quiet on that client until the page is reloaded. |
+| Rescan token art | | Forgets which files were found and looks again, from any GM window; also resumes after Restore All. |
+| Restore every token to its base | | Puts every token back to its base image and forgets the looks; the step before disabling or uninstalling the module. Token Art then stays paused for the world, on every client, until Rescan is pressed. |
 
 ## Playing with the family
 

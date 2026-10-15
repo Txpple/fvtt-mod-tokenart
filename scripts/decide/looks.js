@@ -81,6 +81,31 @@ export function isLookOf(path, base, separator = "-") {
 }
 
 /**
+ * The base and look a path would be the look of, by its name alone: `t/goblin-dead.webp` →
+ * `{ base: "t/goblin.webp", look: "dead" }`; null when the name ends in no look suffix. A name
+ * alone proves nothing (`walking-dead.webp` may be a base), so the caller asks the server whether
+ * the candidate base exists before believing it; that is the one place a base is read out of a
+ * look's name, for a token that wears a look with no record of its base (a module that stored the
+ * image and handed it back, dnd5e's revert of a transform among them).
+ * @param {unknown} path
+ * @param {string} [separator]
+ * @returns {{ base: string, look: string }|null}
+ */
+export function lookCandidate(path, separator = "-") {
+  if (typeof path !== "string" || !path) return null;
+  const { stem, ext, query } = splitPath(path);
+  for (const look of LOOKS) {
+    const suffix = `${separator}${look}`;
+    if (!stem.endsWith(suffix)) continue;
+    const rest = stem.slice(0, -suffix.length);
+    const name = rest.slice(Math.max(rest.lastIndexOf("/"), rest.lastIndexOf("\\")) + 1);
+    if (!name) return null;
+    return { base: `${rest}${ext}${query}`, look };
+  }
+  return null;
+}
+
+/**
  * A token's base: the one its flags remember when the image it wears is that base or one of its
  * looks (a snapshot restored while prone hands a prone look back, and that is a look, not a new
  * base); otherwise the image it wears, which is how a Token Config edit, a transform or a summon's

@@ -6,6 +6,7 @@ import {
   applicable,
   baseOf,
   isLookOf,
+  lookCandidate,
   lookPath,
   lookPaths,
   restoreUpdate,
@@ -359,5 +360,28 @@ describe("restoreUpdate — back to base and forgotten", () => {
       "ring.subject.texture": "t/s.webp",
       [`flags.-=${FLAG_SCOPE}`]: null
     });
+  });
+});
+
+describe("lookCandidate — the base a look-shaped name points at, for the server to confirm", () => {
+  it("reads the base and the look out of the name", () => {
+    expect(lookCandidate("t/goblin-dead.webp")).toEqual({ base: "t/goblin.webp", look: "dead" });
+    expect(lookCandidate("t/goblin.prone.webp", ".")).toEqual({ base: "t/goblin.webp", look: "prone" });
+    expect(lookCandidate("x/g-ready.webm?v=3")).toEqual({ base: "x/g.webm?v=3", look: "ready" });
+  });
+  it("a name that merely ends in a look word is a candidate too; the file probe decides", () => {
+    expect(lookCandidate("z/walking-dead.webp")).toEqual({ base: "z/walking.webp", look: "dead" });
+  });
+  it("null for a base, a bare suffix, another separator, or junk", () => {
+    expect(lookCandidate("t/goblin.webp")).toBeNull();
+    expect(lookCandidate("t/-dead.webp")).toBeNull();
+    expect(lookCandidate("t/goblin_dead.webp")).toBeNull();
+    expect(lookCandidate("t/goblin_dead.webp", "_")).toEqual({ base: "t/goblin.webp", look: "dead" });
+    expect(lookCandidate(null)).toBeNull();
+    expect(lookCandidate("")).toBeNull();
+  });
+  it("agrees with isLookOf both ways", () => {
+    const c = lookCandidate("t/giant-owl-combat.webp");
+    expect(isLookOf("t/giant-owl-combat.webp", c.base)).toBe(c.look);
   });
 });

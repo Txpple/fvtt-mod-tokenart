@@ -22,6 +22,7 @@ import {
   LOOKS,
   SEPARATORS,
   baseOf,
+  lookCandidate,
   lookPaths,
   restoreUpdate,
   stateOf,
@@ -39,7 +40,9 @@ const S = {
   combatLook: "combatLook",
   proneLook: "proneLook",
   deadLook: "deadLook",
-  separator: "separator"
+  separator: "separator",
+  rescan: "rescan",
+  paused: "paused"
 };
 const LOOK_SETTING = { ready: S.readyLook, combat: S.combatLook, prone: S.proneLook, dead: S.deadLook };
 
@@ -55,8 +58,8 @@ const separator = () => {
 
 const enabledLooks = () => Object.fromEntries(LOOKS.map(look => [look, Boolean(setting(LOOK_SETTING[look]))]));
 
-/** Set by Restore All on the client that ran it: no swaps until the page is reloaded. */
-let suspended = false;
+/** Restore All pauses the module for the whole world, on every client, until Rescan is pressed. */
+const isPaused = () => Boolean(setting(S.paused));
 
 /* ---------------------------------------------------------------------------------------------
  * Which look files exist — a HEAD request per look path, once per base per GM session, misses
@@ -86,21 +89,38 @@ async function exists(src) {
 /** A path worth asking the server about: not empty, not inline data. */
 const probeable = path => typeof path === "string" && path.length > 0 && !/^(data|blob):/i.test(path);
 
-/** `${separator}|${base}` → Promise<{ ready, combat, prone, dead }>. */
+/** path → Promise<boolean>: every answer the server gave this session, misses included. */
 const cache = new Map();
 
-function looksAvailable(base) {
-  const sep = separator();
-  const key = `${sep}|${base}`;
-  let pending = cache.get(key);
+function fileExists(path) {
+  let pending = cache.get(path);
   if (!pending) {
-    const paths = lookPaths(base, sep);
-    pending = Promise.all(LOOKS.map(async look => [look, await exists(paths[look])])).then(entries =>
-      Object.fromEntries(entries)
-    );
-    cache.set(key, pending);
+    pending = exists(path);
+    cache.set(path, pending);
   }
   return pending;
+}
+
+/** Which of a base's four looks have a file: { ready, combat, prone, dead }. */
+async function looksAvailable(base) {
+  const paths = lookPaths(base, separator());
+  const entries = await Promise.all(LOOKS.map(async look => [look, await fileExists(paths[look])]));
+  return Object.fromEntries(entries);
+}
+
+/**
+ * A token's base. Its flags settle it when they recognise the image worn (the base itself or one
+ * of its looks). Otherwise the image is adopted as the new base, with one exception: an image
+ * whose name is a look of a base that exists on the server is that look of that base, so a token
+ * handed a stored look back with no flags (dnd5e's revert of a transform does this) returns to
+ * its base instead of making the look its base.
+ */
+async function resolveBase(src, flags, sep) {
+  const known = baseOf({ src, flags }, sep);
+  if (known !== src || flags?.base === src) return known;
+  const candidate = lookCandidate(src, sep);
+  if (candidate && probeable(candidate.base) && (await fileExists(candidate.base))) return candidate.base;
+  return src;
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -145,13 +165,26 @@ function tokensOf(actor) {
  * The writer
  * ------------------------------------------------------------------------------------------- */
 
+/**
+ * A token's image and ring subject as stored, never as prepared: Foundry animates a texture change,
+ * so the prepared `texture.src` lags the source by the length of the fade (measured 2026-10-15), and
+ * a window whose canvas is throttled can hold the old value for good. Decisions come from the source.
+ */
+function stored(tokenDoc) {
+  const source = tokenDoc._source ?? tokenDoc;
+  const src = source.texture?.src ?? tokenDoc.texture?.src ?? "";
+  const ring = source.ring ?? tokenDoc.ring;
+  const subject = ring?.enabled ? ring.subject?.texture || null : null;
+  return { src, subject };
+}
+
 /** The update a token needs now, with a note for the `tokenart.changed` hook, or null. */
 async function planFor(tokenDoc) {
   const sep = separator();
-  const src = tokenDoc.texture?.src ?? "";
+  const { src, subject: ringSubject } = stored(tokenDoc);
   const flags = tokenDoc.flags?.[MODULE_ID] ?? {};
-  const base = baseOf({ src, flags }, sep);
-  if (!probeable(base)) return null;
+  if (!probeable(src)) return null;
+  const base = await resolveBase(src, flags, sep);
   const available = await looksAvailable(base);
   const look = winningLook(stateFor(tokenDoc), available, enabledLooks());
   const paths = lookPaths(base, sep);
@@ -159,7 +192,6 @@ async function planFor(tokenDoc) {
   // With the ring on and a subject image set, the subject gets the same suffix and both swap
   // together, when the subject's look file exists; with no subject, Foundry draws it from
   // `texture.src` and that alone is written.
-  const ringSubject = tokenDoc.ring?.enabled ? tokenDoc.ring.subject?.texture || null : null;
   let subjectBase = null;
   let subjectLookSrc = null;
   if (ringSubject) {
@@ -177,9 +209,21 @@ async function planFor(tokenDoc) {
   return { update, note: { from: src, to: update["texture.src"] ?? src, look } };
 }
 
-/** Resolve and write the looks of these tokens, one update per scene. Returns how many changed. */
-async function applyTokens(tokens) {
-  if (!isActiveGM() || suspended) return 0;
+/**
+ * Resolve and write the looks of these tokens, one update per scene. Returns how many changed.
+ * Runs one call at a time: a reconcile at `ready` and a condition landing in the same second both
+ * read the token fresh when their turn comes, so the second finds nothing left to write.
+ */
+let chain = Promise.resolve(0);
+function applyTokens(tokens) {
+  if (!isActiveGM() || isPaused()) return Promise.resolve(0);
+  const next = chain.then(() => applyTokensNow(tokens));
+  chain = next.catch(() => 0);
+  return next;
+}
+
+async function applyTokensNow(tokens) {
+  if (!isActiveGM() || isPaused()) return 0;
   const byScene = new Map();
   for (const t of tokens) {
     if (!t?.parent) continue;
@@ -231,7 +275,8 @@ const api = {
   async looksFor(tokenDoc) {
     const sep = separator();
     const flags = tokenDoc.flags?.[MODULE_ID] ?? {};
-    const base = baseOf({ src: tokenDoc.texture?.src ?? "", flags }, sep);
+    const { src } = stored(tokenDoc);
+    const base = probeable(src) ? await resolveBase(src, flags, sep) : src;
     const paths = lookPaths(base, sep);
     const available = probeable(base) ? await looksAvailable(base) : {};
     return {
@@ -245,18 +290,19 @@ const api = {
   /** Resolve and write one token's look now (the active GM's client only). */
   apply: tokenDoc => applyTokens([tokenDoc]),
 
-  /** Forget which look files were found and reconcile every token: new art uploaded mid-session. */
+  /**
+   * Forget which look files were found and reconcile every token: new art uploaded mid-session.
+   * Rides a hidden world setting, so every client's cache clears and the active GM's client does
+   * the reconcile whichever window pressed the button (a headless bridge may hold that seat).
+   */
   async rescan() {
-    cache.clear();
-    if (!isActiveGM()) {
-      ui.notifications.info(
-        `${TITLE}: this client's list of found art is cleared. Images are swapped by the active GM's client.`
-      );
-      return 0;
+    if (!game.user.isGM) {
+      ui.notifications.warn(`${TITLE}: only a GM can rescan.`);
+      return;
     }
-    const changed = await reconcileAll();
-    ui.notifications.info(`${TITLE}: rescanned; ${changed} token${changed === 1 ? "" : "s"} changed.`);
-    return changed;
+    if (isPaused()) await game.settings.set(MODULE_ID, S.paused, false);
+    await game.settings.set(MODULE_ID, S.rescan, Date.now());
+    ui.notifications.info(`${TITLE}: rescanning on every client.`);
   },
 
   /** Every token back to its base, its flags gone: the step before the module is disabled. */
@@ -270,26 +316,26 @@ const api = {
         window: { title: `${TITLE}: Restore every token to its base?`, icon: "fa-solid fa-arrow-rotate-left" },
         content:
           "<p>Every token on every scene goes back to its base image and forgets its looks. " +
-          "Token Art then stays quiet on this client until the page is reloaded, so the module can be disabled " +
-          "without the looks coming back.</p>",
+          "Token Art then stays paused for this world, on every client, until Rescan is pressed, so the module " +
+          "can be disabled without the looks coming back.</p>",
         yes: { label: "Restore all", icon: "fa-solid fa-arrow-rotate-left" },
         no: { label: "Keep the looks" },
         modal: true
       });
       if (!yes) return 0;
     }
-    suspended = true;
+    await game.settings.set(MODULE_ID, S.paused, true);
     let restored = 0;
     for (const scene of game.scenes) {
       const updates = [];
       const notes = {};
       for (const t of scene.tokens) {
         const flags = t.flags?.[MODULE_ID] ?? {};
-        const ringSubject = t.ring?.enabled ? t.ring.subject?.texture || null : null;
-        const update = restoreUpdate({ id: t.id, src: t.texture?.src ?? "", subject: ringSubject, flags });
+        const { src, subject } = stored(t);
+        const update = restoreUpdate({ id: t.id, src, subject, flags });
         if (!update) continue;
         updates.push(update);
-        notes[t.id] = { from: t.texture?.src ?? "", to: update["texture.src"] ?? t.texture?.src ?? "", look: null };
+        notes[t.id] = { from: src, to: update["texture.src"] ?? src, look: null };
       }
       if (!updates.length) continue;
       try {
@@ -300,7 +346,7 @@ const api = {
       }
     }
     ui.notifications.info(
-      `${TITLE}: ${restored} token${restored === 1 ? "" : "s"} restored. Paused on this client until the page is reloaded; disable the module now, or reload to resume.`
+      `${TITLE}: ${restored} token${restored === 1 ? "" : "s"} restored. Paused for this world: disable the module now, or press Rescan to resume.`
     );
     return restored;
   }
@@ -379,7 +425,31 @@ Hooks.once("init", () => {
     }
   });
 
-  game.settings.registerMenu(MODULE_ID, "rescan", {
+  // Hidden: the pause Restore All sets for the whole world (any GM client that joined meanwhile,
+  // a bridge among them, would otherwise put the looks straight back); Rescan clears it.
+  game.settings.register(MODULE_ID, S.paused, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false
+  });
+
+  // Hidden: the rescan signal. Its change reaches every client; the active GM's reconciles.
+  game.settings.register(MODULE_ID, S.rescan, {
+    scope: "world",
+    config: false,
+    type: Number,
+    default: 0,
+    onChange: () => {
+      cache.clear();
+      if (!isActiveGM() || isPaused()) return;
+      void reconcileAll().then(changed =>
+        ui.notifications.info(`${TITLE}: rescanned; ${changed} token${changed === 1 ? "" : "s"} changed.`)
+      );
+    }
+  });
+
+  game.settings.registerMenu(MODULE_ID, "rescanMenu", {
     name: "Rescan token art",
     label: "Rescan",
     hint: "Forget which look files were found and look again. Press it after uploading new art mid-session; a reload does the same.",
@@ -388,7 +458,7 @@ Hooks.once("init", () => {
     restricted: true
   });
 
-  game.settings.registerMenu(MODULE_ID, "restore", {
+  game.settings.registerMenu(MODULE_ID, "restoreMenu", {
     name: "Restore every token to its base",
     label: "Restore all",
     hint: "Put every token back to its base image and forget the looks: the step before disabling or uninstalling the module.",
@@ -433,7 +503,7 @@ Hooks.once("setup", () => {
 const whenActiveGM =
   fn =>
   (...args) => {
-    if (!isActiveGM() || suspended) return;
+    if (!isActiveGM() || isPaused()) return;
     void fn(...args);
   };
 
@@ -443,7 +513,7 @@ Hooks.once("ready", () => {
 
 // When the active GM leaves, the next GM client picks the job up and sweeps what was missed.
 Hooks.on("userConnected", (user, connected) => {
-  if (!connected && user.isGM && isActiveGM() && !suspended) void reconcileAll();
+  if (!connected && user.isGM && isActiveGM() && !isPaused()) void reconcileAll();
 });
 
 Hooks.on(
@@ -458,7 +528,7 @@ Hooks.on("updateToken", (doc, changed, options) => {
     Hooks.callAll("tokenart.changed", doc, note);
     return;
   }
-  if (!isActiveGM() || suspended) return;
+  if (!isActiveGM() || isPaused()) return;
   // Anyone else's texture change is the new base (a Token Config edit, a transform, a summon's
   // landing), unless it is one of the current base's own looks; re-resolve either way.
   const has = key => foundry.utils.hasProperty(changed, key);

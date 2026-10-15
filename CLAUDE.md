@@ -6,11 +6,24 @@ configure. Part of Open Roll 5e (the suite repo is `..`, its CLAUDE.md has the f
 conventions; the plan this was built from is `../docs/plans/tokenart.md`). Plain ES modules, no
 build step, no patching beyond one manual wrap, no libWrapper, no socketlib, MIT.
 
-**State (2026-10-15).** Built from the plan on 2026-10-15; `npm run verify` green; deployed to the
-sandbox with the dnd5e MCP's `deploy-house-module.mjs --local` and walked (the twelve steps in
-`tools/README.md`). Not released: 1.0.0 is the manifest's version and the first release is the
-user's call, then the prod install through Foundry's installer (`register-module.mjs`, a new
-module needs `/setup`'s `installPackage`, never a world bounce) and `configure-modules.mjs --enable`.
+**State (2026-10-15).** Built from the plan on 2026-10-15; `npm run verify` green (58 tests);
+deployed to the sandbox with the dnd5e MCP's `deploy-house-module.mjs --local`, registered there by a
+restart of the local Foundry process (a new module's folder is scanned at process boot), enabled, and
+walked: steps 1–11 of `tools/README.md` green and step 12's Restore All green (the results are under
+the list); **owed: the re-run of step 12's "then disabled" half** on the world-pause build, which a
+By the Books battery on the sandbox kept from running. The walk changed the build four times:
+decisions read the token's stored image (`_source`), never the prepared one, since Foundry animates a
+texture change and the prepared `texture.src` lags the source; Rescan rides a hidden world setting so
+any GM window's press reaches the active GM; a token found wearing a look-shaped image with no flags
+is recognised as that look when the base file exists (dnd5e's `revertOriginalForm` hands the stored
+image back and drops every flag); and Restore All pauses the whole world, not one client, since the
+MCP's `configure-modules.mjs` page is a GM client that runs the module. Not released: 1.0.0 is the
+manifest's version and the first release is the user's call, then the prod install through Foundry's
+installer (`register-module.mjs`, a new module needs `/setup`'s `installPackage`, never a world
+bounce) and `configure-modules.mjs --enable`. The sandbox was left with the module enabled, the
+walk's art under `assets/tokenart-walk/` (nine small PNGs), two scenes `Token Art Walk A` (active)
+and `Token Art Walk B`, each with a BTB Test Fighter token wearing the ready look: the cleanup
+(delete the two scenes, activate Party Camp) waits for the battery to end.
 
 ## The decisions (taken 2026-10-15, the plan's D1–D4)
 
@@ -42,13 +55,30 @@ module needs `/setup`'s `installPackage`, never a world bounce) and `configure-m
   GM may be the bridge's headless client; nothing here needs a canvas.
 - **Flat keys on the write** (`"texture.src"`): By the Books measured a nested `texture` object
   leaving the prepared texture stale on 14.369.
+- **Read the source, not the prepared data** (`stored()` in tokenart.js). Foundry 13+ animates a
+  token's texture change, and the document's prepared `texture.src` only takes the new value when
+  the fade ends; a window whose canvas is throttled (a hidden pane, a background tab) can hold the
+  old value for good. `_source.texture.src` is right at once. The same goes for the ring subject.
+- **The base is resolved in three steps** (`resolveBase`): the flags recognise the image worn (the
+  base or one of its looks); else a look-shaped name whose base file exists is that look
+  (`lookCandidate` names it, one cached HEAD confirms it); else the image is adopted as the base.
+  The probe is what keeps `walking-dead.webp` a base when no `walking.webp` sits beside it.
+- **Writes run one at a time** (`applyTokens` chains): a `ready` reconcile and an event in the
+  same second both read the token fresh when their turn comes.
+- **Every look is per token, so a linked actor with two placed tokens swaps both**, and a listener
+  on `tokenart.changed` hears one call per token (the walk's "double" was that, not a double write).
 - **The marker option.** The module's own `updateToken` is told apart by `options.tokenart`; every
   client fires `tokenart.changed` from it. Anyone else's `texture.src` change on the active GM
   re-resolves the token through `baseOf`: a look of the known base is recognised, anything else is
   adopted as the new base.
-- **Restore All** sets a client-side `suspended` flag until reload, so the module can be disabled
-  without the looks coming back; a second GM client would re-apply, which the README does not
-  promise against.
+- **Restore All** sets a hidden world setting (`paused`) before it writes, so every client, the
+  bridge's included, stays quiet until **Rescan** is pressed, and the module can be disabled without
+  the looks coming back. The first build paused the pressing client only, and the walk's step 12
+  caught it: the dnd5e MCP's `configure-modules.mjs` joins as a GM to write the disable, its page
+  ran the module, and its `ready` reconcile dressed the restored tokens again before the bounce.
+  **Rescan** clears the pause and sets a hidden world setting (`rescan`, a timestamp); its
+  `onChange` clears every client's cache and the active GM's client reconciles, so the button works
+  from any GM window.
 
 ## Conventions this repo keeps
 
