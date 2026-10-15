@@ -45,7 +45,11 @@ and drops them in 16 (`withDeletionOperators`; 13 keeps the keys). `npm run veri
 three live checks owed (a back-to-base swap, Restore All then Rescan, the wildcard with an unmatched base) ran
 green on the sandbox through a GM page script with the console captured, zero deletion-key warnings; the
 check's first run taught that a fresh NPC with no Hit Points sits at 0 and wears its dead look (D1). Released
-as **1.0.1** (tag `v1.0.1`, both assets on the release); the sandbox carries the same bytes (`--local`).
+as **1.0.1** (tag `v1.0.1`, both assets on the release, the zip built from the tag with LF endings so a
+byte-identical check against the repo holds) and installed on prod through the installer the same evening
+(`register-module.mjs` from the GitHub manifest; the DM's own window was the one non-bridge connection dropped,
+on the user's word; read back `installed v1.0.1 (active=true)` with `configure-modules.mjs --dry-run`); the
+sandbox carries the same bytes (`--local`).
 
 ## The decisions (taken 2026-10-15, the plan's D1–D4)
 
