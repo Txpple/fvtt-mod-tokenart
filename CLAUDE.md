@@ -1,7 +1,7 @@
 # fvtt-mod-tokenart — working notes for sessions in this repo
 
 **What this is.** Open Roll 5e: Token Art, a Foundry VTT module: every token wears the look of its
-state (ready, combat, prone, dead), each a file named beside the base art, with nothing to
+state (ready, combat, dead), each a file named beside the base art, with nothing to
 configure. Part of Open Roll 5e (the suite repo is `..`, its CLAUDE.md has the family's
 conventions; the plan this was built from is `../docs/plans/tokenart.md`). Plain ES modules, no
 build step, no patching beyond one manual wrap, no libWrapper, no socketlib, MIT.
@@ -18,12 +18,17 @@ How it was built, walked and released: `docs/log/2026-10.md`.
   characters included (dying by the book; the table's call, as Combat Plus's Auto-Defeated). A
   `down` look for a dying PC is one more word in `LOOKS` and one more place in `PRECEDENCE` if
   wanted later.
-- **D2. A missing look falls through** to the next that applies and exists: dead → prone → combat
-  → ready → base. A look switched off counts as missing.
+- **D2. A missing look falls through** to the next that applies and exists: dead → combat → ready
+  → base. A look switched off counts as missing.
 - **D3. Combat from the tracker**, the moment a token is added, started or not; removed, or the
   combat deleted, it comes off.
 - **D4. The name** Token Art: free on the setup screen's package list when it was chosen (the
   count and its neighbours there are in the log).
+- **D5. No prone look** (1.0.2, on the user's word): the Prone condition is not a state, and the
+  `prone` word is no look. A `-prone` file beside a base is an ordinary image (a wildcard may draw
+  it; the table deletes or renames the ones it made). A token upgraded while flagged `look: "prone"`
+  is still recognised by its flags and returns to its base at the first reconcile; the old
+  `proneLook` setting is no longer registered, its stored entry read by nothing.
 
 ## How the code is laid out
 

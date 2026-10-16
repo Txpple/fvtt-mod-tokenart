@@ -21,13 +21,14 @@ enable it in the world (`configure-modules.mjs --enable fvtt-mod-tokenart`).
 
 ## The sandbox walk (acceptance)
 
-Run by hand against the local sandbox with a BTB test actor whose token is `x.webp` and four look
+Run by hand against the local sandbox with a BTB test actor whose token is `x.webp` and three look
 files uploaded beside it (imagegen redresses, or tinted copies for a first walk). Each line is
 green when what it says is what the token shows.
 
 1. **Placed:** the token wears the ready look.
 2. **Added to the tracker:** combat. **Removed:** ready. **Combat deleted with it inside:** ready.
-3. **Prone applied** (`apply-condition`): prone, in and out of combat. **Removed in combat:** combat.
+3. **The Dead condition applied** (`apply-condition`): dead, in and out of combat. **Removed in
+   combat:** combat. **Prone applied:** nothing changes (no condition but Dead is a state).
 4. **Hit Points to 0:** dead, under Combat Plus's skull. **Healed:** whatever applies.
 5. **The `-combat` file deleted and Rescan pressed:** a combatant falls through to ready.
 6. **The texture changed by hand in Token Config:** adopted as the base, its looks re-derived.
@@ -42,7 +43,8 @@ green when what it says is what the token shows.
     to it.
 12. **Restore all, then the module disabled:** every token at its base.
 
-**Walked 2026-10-15** on the local sandbox (Foundry 14.369, dnd5e 6.0.6), with a BTB test fighter's
+**Walked 2026-10-15** (1.0.0, when the module had a prone look and step 3 applied the Prone
+condition) on the local sandbox (Foundry 14.369, dnd5e 6.0.6), with a BTB test fighter's
 token set to `assets/tokenart-walk/x.png` and five labelled discs as the base and the four looks, the
 MCP bridge and a browser window both GM clients, and a `tokenart.changed` listener counting every
 swap. All twelve green. Notes per step: 1 one write, flags `base` + `look`. 2 one swap per change,

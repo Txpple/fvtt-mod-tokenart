@@ -1,19 +1,19 @@
 # Open Roll 5e: Token Art
 
 A Foundry VTT module that gives every token the look of its state. Name a file beside the token's
-art, `goblin-dead.webp` next to `goblin.webp`, and the token wears it when the goblin dies. Four
+art, `goblin-dead.webp` next to `goblin.webp`, and the token wears it when the goblin dies. Three
 looks, found by file name, with nothing to configure: **ready** when nothing else applies,
-**combat** while a combat lists the token, **prone** under the Prone condition, **dead** at 0 Hit
-Points. A look you have not made is simply skipped, and the base art is the floor.
+**combat** while a combat lists the token, **dead** at 0 Hit Points. A look you have not made is
+simply skipped, and the base art is the floor.
 
 ## How it works
 
 - **The base is the token's own image**, whatever Token Config, a transform or a summon's landing
   set. The module never writes it and never touches the prototype token.
 - **The looks sit beside the base**, the same name with a suffix before the extension, in the same
-  folder: `goblin-ready.webp`, `goblin-combat.webp`, `goblin-prone.webp`, `goblin-dead.webp`. No
-  subfolders, no table, no folder scan.
-- **The GM's client does the swapping.** Once per image, it asks the server which of the four
+  folder: `goblin-ready.webp`, `goblin-combat.webp`, `goblin-dead.webp`. No subfolders, no table,
+  no folder scan.
+- **The GM's client does the swapping.** Once per image, it asks the server which of the three
   files exist, then changes the token's image as the state changes. Players' clients see the
   swaps and do nothing else.
 - **Every scene follows**, viewed or not: the module watches the documents, not the canvas, so a
@@ -30,7 +30,7 @@ https://github.com/Txpple/fvtt-mod-tokenart/releases/latest/download/module.json
 ```
 
 Requires Foundry VTT v13 or v14 and the dnd5e system (the dead look reads dnd5e's hit points; the
-conditions are Foundry's own). No other dependencies.
+Dead condition is Foundry's own). No other dependencies.
 
 ## The convention
 
@@ -39,7 +39,6 @@ conditions are Foundry's own). No other dependencies.
 | base | `goblin.webp` | the token's own image; the floor |
 | ready | `goblin-ready.webp` | nothing else applies |
 | combat | `goblin-combat.webp` | a combat lists the token, from the moment it is added to the tracker |
-| prone | `goblin-prone.webp` | the creature has the Prone condition |
 | dead | `goblin-dead.webp` | the creature is at 0 Hit Points or has the Dead condition |
 
 A creature's folder reads as one family of names, the portrait By the Books' Summon Art already
@@ -51,13 +50,13 @@ assets/tokens/
   giant-owl-portrait.webp     the portrait, for Summon Art
   giant-owl-ready.webp
   giant-owl-combat.webp
-  giant-owl-prone.webp
   giant-owl-dead.webp
 ```
 
-- **Which look wins:** dead, then prone, then combat, then ready, then the base. A dead creature is
-  dead whatever else is true; a prone combatant is prone; a combatant is in combat; anything else
-  at rest is ready. A look whose file is missing, or whose switch is off, hands over to the next.
+- **Which look wins:** dead, then combat, then ready, then the base. A dead creature is dead
+  whatever else is true; a combatant is in combat; anything else at rest is ready. A look whose
+  file is missing, or whose switch is off, hands over to the next. No other condition is a state:
+  a prone or unconscious creature wears whatever else applies.
 - **Dead is one rule for everyone.** A player character at 0 Hit Points is dying by the book, not
   dead; this module shows the dead look anyway, as Combat Plus's Auto-Defeated stamps the overlay.
   Turn the *Dead look* switch off if your table would rather not. Who writes the Dead status this
@@ -92,7 +91,6 @@ assets/tokens/
 | --- | --- | --- |
 | Ready look | On | Wears the `-ready` image whenever nothing else applies. |
 | Combat look | On | Wears the `-combat` image while a combat lists the token. |
-| Prone look | On | Wears the `-prone` image under the Prone condition. |
 | Dead look | On | Wears the `-dead` image at 0 Hit Points or with the Dead condition. |
 | Suffix separator | `-` | The character before the look word: `goblin-dead.webp`, `goblin_dead.webp` or `goblin.dead.webp`. |
 | Rescan token art | | Forgets which files were found and looks again, from any GM window; also resumes after Restore All. |
@@ -106,7 +104,7 @@ assets/tokens/
 - **By the Books'** Summon Art, Wild Shape Art and Battle Familiar's transforms all write token
   images; each is adopted as the base and the looks follow.
 - **The dnd5e MCP's** `set-actor-art` writes the base, nothing more to teach it. **imagegen** makes
-  the looks: an edit of the base token ("the same goblin lying prone", "dead, eyes closed, weapon
+  the looks: an edit of the base token ("the same goblin, weapon drawn", "dead, eyes closed, weapon
   dropped"), saved under the convention's names and uploaded beside the base.
 
 Each module installs and works on its own; none of the above is required.
@@ -125,7 +123,7 @@ One hook, fired on every client whenever the module changes a token's image:
 
 ```js
 Hooks.on("tokenart.changed", (tokenDoc, { from, to, look }) => {
-  // `look` is "ready", "combat", "prone" or "dead", or null when the token is back at its base
+  // `look` is "ready", "combat" or "dead", or null when the token is back at its base
 });
 ```
 

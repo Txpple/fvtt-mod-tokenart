@@ -52,7 +52,7 @@ describe("lookPath / lookPaths — base → looks, one way", () => {
     expect(lookPath("assets/tokens/goblin.webp", "dead")).toBe("assets/tokens/goblin-dead.webp");
   });
   it("keeps the query string after the extension", () => {
-    expect(lookPath("x/goblin.webp?v=3", "prone")).toBe("x/goblin-prone.webp?v=3");
+    expect(lookPath("x/goblin.webp?v=3", "dead")).toBe("x/goblin-dead.webp?v=3");
   });
   it("follows video textures the same way", () => {
     expect(lookPath("x/goblin.webm", "combat")).toBe("x/goblin-combat.webm");
@@ -64,14 +64,14 @@ describe("lookPath / lookPaths — base → looks, one way", () => {
   it("a base with no extension still gets its looks", () => {
     expect(lookPath("tokens/goblin", "dead")).toBe("tokens/goblin-dead");
   });
-  it("gives every look its path", () => {
+  it("gives every look its path: three looks, ready, combat and dead", () => {
     expect(lookPaths("g.webp")).toEqual({
       ready: "g-ready.webp",
       combat: "g-combat.webp",
-      prone: "g-prone.webp",
       dead: "g-dead.webp"
     });
     expect(Object.keys(lookPaths("g.webp"))).toEqual([...LOOKS]);
+    expect(LOOKS).not.toContain("prone");
   });
 });
 
@@ -93,6 +93,9 @@ describe("isLookOf — which look a path is of a base", () => {
     expect(isLookOf("walking.webp", "walking-dead.webp")).toBeNull();
     expect(isLookOf("walking-dead-dead.webp", "walking-dead.webp")).toBe("dead");
   });
+  it("a word that is no look is no look: goblin-prone.webp is not a look of goblin.webp", () => {
+    expect(isLookOf("t/goblin-prone.webp", "t/goblin.webp")).toBeNull();
+  });
   it("tolerates junk", () => {
     expect(isLookOf(null, "g.webp")).toBeNull();
     expect(isLookOf("g-dead.webp", undefined)).toBeNull();
@@ -106,26 +109,44 @@ describe("baseOf — adoption against recognition", () => {
     expect(baseOf({ src: "t/goblin.webp" })).toBe("t/goblin.webp");
   });
   it("wearing a look of the known base keeps that base", () => {
-    expect(baseOf({ src: "t/goblin-prone.webp", flags: { base: "t/goblin.webp", look: "prone" } })).toBe(
+    expect(baseOf({ src: "t/goblin-combat.webp", flags: { base: "t/goblin.webp", look: "combat" } })).toBe(
       "t/goblin.webp"
     );
   });
   it("a snapshot that hands a look back is a look, not a new base", () => {
-    expect(baseOf({ src: "t/owl-prone.webp", flags: { base: "t/owl.webp" } })).toBe("t/owl.webp");
+    expect(baseOf({ src: "t/owl-dead.webp", flags: { base: "t/owl.webp" } })).toBe("t/owl.webp");
   });
   it("any other image is adopted as the new base", () => {
     expect(baseOf({ src: "t/bear.webp", flags: { base: "t/owl.webp", look: "ready" } })).toBe("t/bear.webp");
   });
   it("a look under another separator is a new base, not a look", () => {
-    expect(baseOf({ src: "t/owl_prone.webp", flags: { base: "t/owl.webp" } })).toBe("t/owl_prone.webp");
-    expect(baseOf({ src: "t/owl_prone.webp", flags: { base: "t/owl.webp" } }, "_")).toBe("t/owl.webp");
+    expect(baseOf({ src: "t/owl_dead.webp", flags: { base: "t/owl.webp" } })).toBe("t/owl_dead.webp");
+    expect(baseOf({ src: "t/owl_dead.webp", flags: { base: "t/owl.webp" } }, "_")).toBe("t/owl.webp");
   });
   it("the look the flags name is the module's own write, recognised after the separator changes", () => {
     // Dressed goblin_dead.webp under "_", the table switches to "-": still the dead look of goblin.webp.
-    expect(baseOf({ src: "t/owl_prone.webp", flags: { base: "t/owl.webp", look: "prone" } })).toBe("t/owl.webp");
-    expect(baseOf({ src: "t/owl.prone.webp", flags: { base: "t/owl.webp", look: "prone" } }, "_")).toBe("t/owl.webp");
+    expect(baseOf({ src: "t/owl_dead.webp", flags: { base: "t/owl.webp", look: "dead" } })).toBe("t/owl.webp");
+    expect(baseOf({ src: "t/owl.dead.webp", flags: { base: "t/owl.webp", look: "dead" } }, "_")).toBe("t/owl.webp");
     // The flags must name that look; another look's path under another separator is a hand change.
-    expect(baseOf({ src: "t/owl_dead.webp", flags: { base: "t/owl.webp", look: "prone" } })).toBe("t/owl_dead.webp");
+    expect(baseOf({ src: "t/owl_combat.webp", flags: { base: "t/owl.webp", look: "dead" } })).toBe("t/owl_combat.webp");
+  });
+  it("a look the module no longer has (1.0.x's prone) is still its own write when the flags name it", () => {
+    // Upgraded from 1.0.1 while wearing the prone look: the flags say so, and the token returns to
+    // its base instead of adopting goblin-prone.webp as a base of its own.
+    const flags = { base: "t/goblin.webp", look: "prone" };
+    expect(baseOf({ src: "t/goblin-prone.webp", flags })).toBe("t/goblin.webp");
+    expect(tokenUpdate({ id: "a", src: "t/goblin-prone.webp", flags }, { base: "t/goblin.webp", look: null })).toEqual({
+      _id: "a",
+      "texture.src": "t/goblin.webp",
+      "flags.fvtt-mod-tokenart.-=look": null
+    });
+    expect(restoreUpdate({ id: "a", src: "t/goblin-prone.webp", flags })).toEqual({
+      _id: "a",
+      "texture.src": "t/goblin.webp",
+      [`flags.-=${FLAG_SCOPE}`]: null
+    });
+    // With no look flag the name is just a name: adopted, as any image is.
+    expect(baseOf({ src: "t/goblin-prone.webp", flags: { base: "t/goblin.webp" } })).toBe("t/goblin-prone.webp");
   });
   it("switching the separator while a look is worn takes the token back to its base, not to a new base", () => {
     const B = "t/goblin.webp";
@@ -156,37 +177,42 @@ describe("stateOf — one rule for everyone", () => {
     expect(stateOf({ hp: 12, statuses: new Set(["unconscious"]), inCombat: false }).dead).toBe(false);
   });
   it("no hit points known (another system, a vehicle): not dead by HP", () => {
-    expect(stateOf({ hp: null, statuses: new Set(), inCombat: true })).toEqual({
-      dead: false,
-      prone: false,
-      combat: true
-    });
-    expect(stateOf({ hp: undefined, statuses: null })).toEqual({ dead: false, prone: false, combat: false });
+    expect(stateOf({ hp: null, statuses: new Set(), inCombat: true })).toEqual({ dead: false, combat: true });
+    expect(stateOf({ hp: undefined, statuses: null })).toEqual({ dead: false, combat: false });
   });
-  it("prone from the status, combat from the tracker, statuses as a Set or an array", () => {
-    expect(stateOf({ hp: 5, statuses: ["prone"], inCombat: true })).toEqual({ dead: false, prone: true, combat: true });
-    expect(stateOf({ hp: 5, statuses: new Set(["prone"]), inCombat: false }).prone).toBe(true);
+  it("dead from the status, combat from the tracker, statuses as a Set or an array", () => {
+    expect(stateOf({ hp: 5, statuses: ["dead"], inCombat: true })).toEqual({ dead: true, combat: true });
+    expect(stateOf({ hp: 5, statuses: new Set(["dead"]), inCombat: false })).toEqual({ dead: true, combat: false });
+  });
+  it("the Prone condition is not a state: a prone creature is whatever else it is", () => {
+    expect(stateOf({ hp: 5, statuses: new Set(["prone"]), inCombat: false })).toEqual({ dead: false, combat: false });
+    expect(stateOf({ hp: 5, statuses: ["prone"], inCombat: true })).toEqual({ dead: false, combat: true });
+    expect(stateOf({ hp: 0, statuses: ["prone"], inCombat: true })).toEqual({ dead: true, combat: true });
   });
 });
 
-describe("applicable / winningLook — dead > prone > combat > ready > base", () => {
-  const all = { ready: true, combat: true, prone: true, dead: true };
+describe("applicable / winningLook — dead > combat > ready > base", () => {
+  const all = { ready: true, combat: true, dead: true };
   it("the precedence is the one the README states", () => {
-    expect([...PRECEDENCE]).toEqual(["dead", "prone", "combat", "ready"]);
+    expect([...PRECEDENCE]).toEqual(["dead", "combat", "ready"]);
   });
   it("lists what a state asks for, strongest first, ready always", () => {
-    expect(applicable({ dead: true, prone: true, combat: true })).toEqual(["dead", "prone", "combat", "ready"]);
-    expect(applicable({ prone: true })).toEqual(["prone", "ready"]);
+    expect(applicable({ dead: true, combat: true })).toEqual(["dead", "combat", "ready"]);
+    expect(applicable({ combat: true })).toEqual(["combat", "ready"]);
     expect(applicable({})).toEqual(["ready"]);
     expect(applicable(null)).toEqual(["ready"]);
   });
   it("a dead creature is dead whatever else is true", () => {
-    expect(winningLook({ dead: true, prone: true, combat: true }, all)).toBe("dead");
+    expect(winningLook({ dead: true, combat: true }, all)).toBe("dead");
   });
-  it("a prone combatant is prone; a combatant is in combat; anything else is ready", () => {
-    expect(winningLook({ prone: true, combat: true }, all)).toBe("prone");
+  it("a combatant is in combat; anything else is ready", () => {
     expect(winningLook({ combat: true }, all)).toBe("combat");
     expect(winningLook({}, all)).toBe("ready");
+  });
+  it("a state the module does not track asks for no look, whatever files sit beside the base", () => {
+    expect(applicable({ prone: true })).toEqual(["ready"]);
+    expect(winningLook({ prone: true, combat: true }, { ...all, prone: true })).toBe("combat");
+    expect(winningLook({ prone: true }, new Set(["prone"]))).toBeNull();
   });
   it("a missing file falls through to the next look that applies and exists", () => {
     expect(winningLook({ dead: true, combat: true }, { ready: true, combat: true })).toBe("combat");
@@ -200,23 +226,29 @@ describe("applicable / winningLook — dead > prone > combat > ready > base", ()
   it("a look switched off counts as missing", () => {
     expect(winningLook({ dead: true, combat: true }, all, { dead: false })).toBe("combat");
     expect(winningLook({}, all, { ready: false })).toBeNull();
-    expect(winningLook({ prone: true }, all, { prone: false, combat: false })).toBe("ready");
+    expect(winningLook({ combat: true }, all, { combat: false })).toBe("ready");
   });
   it("takes the available looks as a Set too", () => {
-    expect(winningLook({ prone: true }, new Set(["prone"]))).toBe("prone");
-    expect(winningLook({ prone: true }, new Set(["ready"]))).toBe("ready");
+    expect(winningLook({ combat: true }, new Set(["combat"]))).toBe("combat");
+    expect(winningLook({ combat: true }, new Set(["ready"]))).toBe("ready");
   });
 });
 
 describe("withoutLooks — a wildcard never draws a look file", () => {
   it("drops the look files of the bases in the list", () => {
     expect(
-      withoutLooks(["g/goblin-1.webp", "g/goblin-1-dead.webp", "g/goblin-2.webp", "g/goblin-2-prone.webp"])
+      withoutLooks(["g/goblin-1.webp", "g/goblin-1-dead.webp", "g/goblin-2.webp", "g/goblin-2-combat.webp"])
     ).toEqual(["g/goblin-1.webp", "g/goblin-2.webp"]);
   });
   it("keeps a file whose name merely ends in a look word", () => {
     expect(withoutLooks(["z/walking-dead.webp", "z/zombie.webp"])).toEqual(["z/walking-dead.webp", "z/zombie.webp"]);
     expect(withoutLooks(["z/walking.webp", "z/walking-dead.webp"])).toEqual(["z/walking.webp"]);
+  });
+  it("a -prone file left over from 1.0.x is an ordinary image: a wildcard may draw it", () => {
+    expect(withoutLooks(["g/goblin-1.webp", "g/goblin-1-prone.webp"])).toEqual([
+      "g/goblin-1.webp",
+      "g/goblin-1-prone.webp"
+    ]);
   });
   it("honours the separator and keeps the order", () => {
     expect(withoutLooks(["g_2.webp", "g_1.webp", "g_1_dead.webp"], "_")).toEqual(["g_2.webp", "g_1.webp"]);
@@ -245,11 +277,12 @@ describe("lookCandidatesOutside — the look-shaped names a wildcard lists witho
     ]);
   });
   it("honours the separator, keeps the order and tolerates junk", () => {
-    expect(lookCandidatesOutside(["g_prone.webp", "g_1.webp", "g_ready.webp"], "_")).toEqual([
-      { path: "g_prone.webp", base: "g.webp", look: "prone" },
+    expect(lookCandidatesOutside(["g_dead.webp", "g_1.webp", "g_ready.webp"], "_")).toEqual([
+      { path: "g_dead.webp", base: "g.webp", look: "dead" },
       { path: "g_ready.webp", base: "g.webp", look: "ready" }
     ]);
-    expect(lookCandidatesOutside(["g_prone.webp"], "-")).toEqual([]);
+    expect(lookCandidatesOutside(["g_dead.webp"], "-")).toEqual([]);
+    expect(lookCandidatesOutside(["g_prone.webp"], "_")).toEqual([]);
     expect(lookCandidatesOutside(null)).toEqual([]);
     expect(lookCandidatesOutside(["g-dead.webp", 3, undefined])).toEqual([
       { path: "g-dead.webp", base: "g.webp", look: "dead" }
@@ -443,8 +476,11 @@ describe("restoreUpdate — back to base and forgotten", () => {
 describe("lookCandidate — the base a look-shaped name points at, for the server to confirm", () => {
   it("reads the base and the look out of the name", () => {
     expect(lookCandidate("t/goblin-dead.webp")).toEqual({ base: "t/goblin.webp", look: "dead" });
-    expect(lookCandidate("t/goblin.prone.webp", ".")).toEqual({ base: "t/goblin.webp", look: "prone" });
+    expect(lookCandidate("t/goblin.combat.webp", ".")).toEqual({ base: "t/goblin.webp", look: "combat" });
     expect(lookCandidate("x/g-ready.webm?v=3")).toEqual({ base: "x/g.webm?v=3", look: "ready" });
+  });
+  it("a name ending in a word that is no look is no candidate", () => {
+    expect(lookCandidate("t/goblin-prone.webp")).toBeNull();
   });
   it("a name that merely ends in a look word is a candidate too; the file probe decides", () => {
     expect(lookCandidate("z/walking-dead.webp")).toEqual({ base: "z/walking.webp", look: "dead" });

@@ -10,11 +10,15 @@
  * `walking-dead-dead.webp` and so on.
  */
 
-/** The looks, in the order the README lists them. */
-export const LOOKS = Object.freeze(["ready", "combat", "prone", "dead"]);
+/**
+ * The looks, in the order the README lists them. A word not here is no look: a file named with one
+ * (`goblin-prone.webp`, which 1.0.x read) is an ordinary image, a base of its own if a token wears
+ * it, and a state the module does not track (the Prone condition) asks for nothing.
+ */
+export const LOOKS = Object.freeze(["ready", "combat", "dead"]);
 
 /** Which look wins when several apply: a dead creature is dead whatever else is true. */
-export const PRECEDENCE = Object.freeze(["dead", "prone", "combat", "ready"]);
+export const PRECEDENCE = Object.freeze(["dead", "combat", "ready"]);
 
 /** The separators a table may pick; "-" is the one By the Books' Summon Art already reads. */
 export const SEPARATORS = Object.freeze(["-", "_", "."]);
@@ -107,12 +111,13 @@ export function lookCandidate(path, separator = "-") {
 
 /**
  * A token's base: the one its flags remember when the image it wears is that base or one of its
- * looks (a snapshot restored while prone hands a prone look back, and that is a look, not a new
+ * looks (a snapshot restored while dead hands a dead look back, and that is a look, not a new
  * base); otherwise the image it wears, which is how a Token Config edit, a transform or a summon's
  * landing becomes the base. The look the flags name is recognised under every separator, so the
  * module's own write survives a change of the separator setting: a token dressed `goblin-dead.webp`
  * under "-" keeps the base `goblin.webp` when the table switches to "_", instead of adopting the
- * dead look as a base of its own.
+ * dead look as a base of its own. The same recognition covers a look the module no longer has: a
+ * token still flagged `look: "prone"` from 1.0.x returns to its base rather than adopting the file.
  * @param {{ src?: string|null, flags?: { base?: string, look?: string } }} token
  * @param {string} [separator]
  * @returns {string}
@@ -130,23 +135,22 @@ export function baseOf({ src, flags }, separator = "-") {
 /**
  * What is true of a creature: dead at 0 Hit Points (dnd5e floors at 0, so "below" is "at") or
  * with the dead status, one rule for everyone (a character at 0 is dying by the book; the table's
- * call); prone with the prone status; in combat when a combat lists its token.
+ * call); in combat when a combat lists its token. No other condition is a state.
  * @param {{ hp?: number|null, statuses?: Set<string>|string[]|null, inCombat?: boolean }} facts
- * @returns {{ dead: boolean, prone: boolean, combat: boolean }}
+ * @returns {{ dead: boolean, combat: boolean }}
  */
 export function stateOf({ hp, statuses, inCombat }) {
   const has = (/** @type {string} */ id) =>
     statuses instanceof Set ? statuses.has(id) : Array.isArray(statuses) ? statuses.includes(id) : false;
   return {
     dead: (typeof hp === "number" && hp <= 0) || has("dead"),
-    prone: has("prone"),
     combat: Boolean(inCombat)
   };
 }
 
 /**
  * The looks a state asks for, strongest first; ready always, as the floor above base.
- * @param {{ dead?: boolean, prone?: boolean, combat?: boolean }|null|undefined} state
+ * @param {{ dead?: boolean, combat?: boolean }|null|undefined} state
  * @returns {string[]}
  */
 export function applicable(state) {
@@ -157,7 +161,7 @@ export function applicable(state) {
  * The look to wear: the first that applies, is switched on and has a file; null means the base.
  * A missing file falls through to the next that applies, so a creature with only a ready look
  * keeps it through a fight instead of flipping to base on the tracker's first row.
- * @param {{ dead?: boolean, prone?: boolean, combat?: boolean }} state
+ * @param {{ dead?: boolean, combat?: boolean }} state
  * @param {Set<string>|Record<string, boolean>|null|undefined} available   the looks whose files exist
  * @param {Record<string, boolean>} [enabled]   the settings; a look absent here counts as on
  * @returns {string|null}

@@ -1,7 +1,7 @@
 /**
- * Token Art — every token wears the look of its state: ready, in combat, prone or dead, each a
- * file named beside the base art (`goblin.webp`, `goblin-ready.webp`, `goblin-combat.webp`,
- * `goblin-prone.webp`, `goblin-dead.webp`). Nothing to configure: the module asks the server
+ * Token Art — every token wears the look of its state: ready, in combat or dead, each a file
+ * named beside the base art (`goblin.webp`, `goblin-ready.webp`, `goblin-combat.webp`,
+ * `goblin-dead.webp`). Nothing to configure: the module asks the server
  * which look files exist beside a token's image, once per image, and swaps `texture.src` as the
  * state changes. A missing look falls through to the next that applies; the base is the floor.
  *
@@ -41,13 +41,13 @@ const TITLE = "Token Art";
 const S = {
   readyLook: "readyLook",
   combatLook: "combatLook",
-  proneLook: "proneLook",
   deadLook: "deadLook",
   separator: "separator",
   rescan: "rescan",
   paused: "paused"
 };
-const LOOK_SETTING = { ready: S.readyLook, combat: S.combatLook, prone: S.proneLook, dead: S.deadLook };
+// 1.0.x also registered `proneLook`; a world that stored it keeps an entry nothing reads.
+const LOOK_SETTING = { ready: S.readyLook, combat: S.combatLook, dead: S.deadLook };
 
 const setting = key => game.settings.get(MODULE_ID, key);
 
@@ -66,7 +66,7 @@ const isPaused = () => Boolean(setting(S.paused));
 
 /* ---------------------------------------------------------------------------------------------
  * Which look files exist — a HEAD request per look path, once per base per GM session, misses
- * included, so a token with no looks costs four requests once and nothing after. `srcExists` is
+ * included, so a token with no looks costs three requests once and nothing after. `srcExists` is
  * source-agnostic (Foundry's data folder, a hosted box, the Forge, S3) and needs no permission.
  * A few at a time, so the first reconcile of a big world does not fire hundreds at once.
  * ------------------------------------------------------------------------------------------- */
@@ -104,7 +104,7 @@ function fileExists(path) {
   return pending;
 }
 
-/** Which of a base's four looks have a file: { ready, combat, prone, dead }. */
+/** Which of a base's three looks have a file: { ready, combat, dead }. */
 async function looksAvailable(base) {
   const paths = lookPaths(base, separator());
   const entries = await Promise.all(LOOKS.map(async look => [look, await fileExists(paths[look])]));
@@ -402,7 +402,7 @@ const api = {
 };
 
 /* ---------------------------------------------------------------------------------------------
- * Settings — four switches, the separator, two buttons
+ * Settings — three switches, the separator, two buttons
  * ------------------------------------------------------------------------------------------- */
 
 /** A settings button that runs an action instead of opening a window. */
@@ -439,7 +439,6 @@ Hooks.once("init", () => {
       "Combat look",
       "A token wears its -combat image while a combat lists it, from the moment it is added to the tracker."
     ],
-    ["prone", "Prone look", "A token wears its -prone image while its creature has the Prone condition."],
     [
       "dead",
       "Dead look",
@@ -616,7 +615,8 @@ Hooks.on(
   })
 );
 
-const WATCHED_STATUSES = new Set(["prone", "dead"]);
+/** The one condition that is a state; any other effect, Prone among them, changes nothing. */
+const WATCHED_STATUSES = new Set(["dead"]);
 const watchesStatus = effect => [...(effect.statuses ?? [])].some(s => WATCHED_STATUSES.has(s));
 
 /** The actor an effect applies to: its parent, or its item's parent. */
