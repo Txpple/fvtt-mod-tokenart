@@ -6,11 +6,14 @@ configure. Part of Open Roll 5e (the suite repo is `..`, its CLAUDE.md has the f
 conventions; the plan this was built from is `../docs/plans/tokenart.md`). Plain ES modules, no
 build step, no patching beyond one manual wrap, no libWrapper, no socketlib, MIT.
 
-**State (2026-10-15).** 1.0.1 is released (both assets) and on prod through the installer; the
-sandbox carries the same bytes (`--local`), the module enabled, with the walk's art under
-`assets/tokenart-walk/` (nine small PNGs) for trying it. `npm run verify` is green (73 tests). The
-design points the 1.0.1 review left are issues #1–#4; its findings are `audits/review-2026-10-15.md`.
-How it was built, walked and released: `docs/log/2026-10.md`.
+**State (2026-10-16).** 1.0.2 is released (both assets; the prone look off, three looks) and the
+sandbox carries its bytes (`--local`, read back through a GM page: `api.LOOKS` three, no `proneLook`
+registered, no Token Art console line; the version the page reports stays 1.0.1 until the local
+process next boots), the module enabled, with the walk's art under `assets/tokenart-walk/` (nine
+small PNGs; its prone look is an ordinary image now) for trying it. Prod runs 1.0.1 until
+the installer is run. `npm run verify` is green (79 tests). The design points the 1.0.1 review left
+are issues #1–#4; its findings are `audits/review-2026-10-15.md`. How it was built, walked and
+released: `docs/log/2026-10.md`.
 
 ## The decisions (the plan's D1–D4)
 
