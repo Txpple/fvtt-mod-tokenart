@@ -6,14 +6,14 @@ configure. Part of Open Roll 5e (the suite repo is `..`, its CLAUDE.md has the f
 conventions; the plan this was built from is `../docs/plans/tokenart.md`). Plain ES modules, no
 build step, no patching beyond one manual wrap, no libWrapper, no socketlib, MIT.
 
-**State (2026-10-16).** 1.0.2 is released (both assets; the prone look off, three looks) and on
-prod through the installer (read back `installed v1.0.2 (active=true)`); the sandbox carries the
-same bytes (`--local`, read back through a GM page: `api.LOOKS` three, no `proneLook` registered, no
-Token Art console line; the version the page reports stays 1.0.1 until the local process next
-boots), the module enabled, with the walk's art under `assets/tokenart-walk/` (nine small PNGs; its
-prone look is an ordinary image now) for trying it. `npm run verify` is green (79 tests). The design
-points the 1.0.1 review left are issues #1–#4; its findings are `audits/review-2026-10-15.md`. How
-it was built, walked and released: `docs/log/2026-10.md`.
+**State (2026-10-30).** 1.0.3 is released (both assets) and on prod through the installer (read
+back from a GM page: version 1.0.3, active, not paused; a rescan of the world sent 6 folder listings
+and no HEAD request). It closed every open issue, #1–#5: a look-shaped name is a base, dnd5e's
+transform stash gets the base, the ring subject falls through on its own, Restore All runs on the
+active GM's client, the probes list folders. The sandbox runs the same bytes (`--local`), with the
+live check's art under `assets/tokenart-check/` (ten copies of one image; the next mirror removes
+it). `npm run verify` is green (97 tests). The 1.0.1 review's findings are
+`audits/review-2026-10-15.md`; how it was built, walked and released: `docs/log/2026-10.md`.
 
 ## The decisions (the plan's D1–D4)
 
