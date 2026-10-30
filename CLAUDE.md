@@ -38,11 +38,14 @@ it was built, walked and released: `docs/log/2026-10.md`.
 - `scripts/decide/looks.js` (`// @ts-check`, pure, no Foundry): `splitPath`, `lookPath`,
   `lookPaths`, `isLookOf`, `baseOf` (adoption against recognition), `stateOf`, `applicable`,
   `winningLook` (the D2 chain), `withoutLooks` (the wildcard filter), `tokenUpdate` (the write,
-  flat keys, or null), `restoreUpdate`. Everything here has a test in `tests/`.
-- `scripts/tokenart.js` (the Foundry side): the settings, the probe cache (`srcExists`, a HEAD per
-  look path, once per base per GM session, misses included, six at a time), the writer (one
-  `updateEmbeddedDocuments` per scene, the `tokenart` option carrying each token's `{ from, to,
-  look }`), the document hooks, the `Actor#getTokenImages` wrap, the API and the
+  flat keys, or null), `restoreUpdate`, `stashedBase` / `stashUpdate` (dnd5e's transform stash),
+  `browseTarget` / `samePath` (the folder listing). Everything here has a test in `tests/`.
+- `scripts/tokenart.js` (the Foundry side): the settings, the probe cache (one listing per folder
+  through `FilePicker.browse`, a socket call that logs no 404; a HEAD only where a path cannot be
+  listed; only definite answers kept, a network error or timeout asked again after a minute; six
+  at a time; every token of a batch planned at once, the viewed and active scenes first), the
+  writer (one `updateEmbeddedDocuments` per scene, the `tokenart` option carrying each token's
+  `{ from, to, look }`), the document hooks, the `Actor#getTokenImages` wrap, the API and the
   `tokenart.changed` hook.
 - **Who acts:** the active GM's client (`game.users.activeGM?.isSelf`). Every GM client computes the
   same look, so a second GM window's write is a no-op diff; no leading-window election. The active
@@ -53,10 +56,16 @@ it was built, walked and released: `docs/log/2026-10.md`.
   token's texture change, and the document's prepared `texture.src` only takes the new value when
   the fade ends; a window whose canvas is throttled (a hidden pane, a background tab) can hold the
   old value for good. `_source.texture.src` is right at once. The same goes for the ring subject.
-- **The base is resolved in three steps** (`resolveBase`): the flags recognise the image worn (the
-  base or one of its looks); else a look-shaped name whose base file exists is that look
-  (`lookCandidate` names it, one cached HEAD confirms it); else the image is adopted as the base.
-  The probe is what keeps `walking-dead.webp` a base when no `walking.webp` sits beside it.
+- **The base is the flags' or the image** (`baseOf`): the flags recognise the image worn (the base
+  or one of its looks); anything else is adopted as the base, a look-shaped name included (a corpse
+  prop wearing `goblin-dead.webp` keeps it, issue #1). What once needed reading a base out of a
+  look's name, dnd5e's revert handing a stored look back with the flags gone, is closed where it
+  starts: when dnd5e writes `flags.dnd5e.previousTokenData` the plan swaps a stored look for its
+  base (`stashFix`), recognised by the flags the transform's own write still carries; a stash made
+  before (an older version) is recognised by name and one probe, only on a token the module has
+  dressed. `lookCandidate` otherwise serves the wildcard filter only.
+- **The ring subject falls through on its own** (D2 for the subject, issue #2): its look is
+  `winningLook` over its own files; `subjectLook` is stored only when it differs from `look`.
 - **Writes run one at a time** (`applyTokens` chains): a `ready` reconcile and an event in the
   same second both read the token fresh when their turn comes.
 - **Every look is per token, so a linked actor with two placed tokens swaps both**, and a listener
@@ -72,7 +81,10 @@ it was built, walked and released: `docs/log/2026-10.md`.
   ran the module, and its `ready` reconcile dressed the restored tokens again before the bounce.
   **Rescan** clears the pause and sets a hidden world setting (`rescan`, a timestamp); its
   `onChange` clears every client's cache and the active GM's client reconciles, so the button works
-  from any GM window.
+  from any GM window. **Restore All runs on the active GM's client too** (issue #4): the pressing
+  window sets the pause, then `restore` (a timestamp); the active GM's `onChange` awaits its own
+  chain, restores (dnd5e's stash included, issue #3) and answers through `restored` (`{ at, count
+  }`), which the pressing window waits on for a minute.
 
 ## Conventions this repo keeps
 

@@ -22,12 +22,17 @@ import {
   LOOKS,
   SEPARATORS,
   baseOf,
+  browseTarget,
   lookCandidate,
   lookCandidatesOutside,
   lookPaths,
   restoreUpdate,
+  samePath,
+  stashUpdate,
+  stashedBase,
   stateOf,
   stillCurrent,
+  subjectLookOf,
   tokenUpdate,
   winningLook,
   withDeletionOperators,
@@ -44,7 +49,9 @@ const S = {
   deadLook: "deadLook",
   separator: "separator",
   rescan: "rescan",
-  paused: "paused"
+  paused: "paused",
+  restore: "restore",
+  restored: "restored"
 };
 // 1.0.x also registered `proneLook`; a world that stored it keeps an entry nothing reads.
 const LOOK_SETTING = { ready: S.readyLook, combat: S.combatLook, dead: S.deadLook };
@@ -65,24 +72,27 @@ const enabledLooks = () => Object.fromEntries(LOOKS.map(look => [look, Boolean(s
 const isPaused = () => Boolean(setting(S.paused));
 
 /* ---------------------------------------------------------------------------------------------
- * Which look files exist — a HEAD request per look path, once per base per GM session, misses
- * included, so a token with no looks costs three requests once and nothing after. `srcExists` is
- * source-agnostic (Foundry's data folder, a hosted box, the Forge, S3) and needs no permission.
- * A few at a time, so the first reconcile of a big world does not fire hundreds at once.
+ * Which look files exist. A path in Foundry's own storage (the data folder, the public folder) is
+ * answered from one listing of its folder through Foundry's file browser, a socket call, once per
+ * folder per GM session: a world whose art has no looks costs a few listings and logs nothing. A
+ * path the browser cannot list (a URL, the Forge, S3, a folder it refuses) falls back to a HEAD
+ * request. Only a definite answer is remembered: a listing, a found file, a 404; a network error or
+ * a timeout is asked again after a minute, so a slow server at load does not strip the looks for
+ * the session. A few requests at a time, so the first reconcile of a big world does not fire
+ * hundreds at once. Only GM clients probe.
  * ------------------------------------------------------------------------------------------- */
 
-const srcExists = src => (foundry.utils.srcExists ?? foundry.canvas?.srcExists ?? globalThis.srcExists)(src);
 const PARALLEL = 6;
+const RETRY_MS = 60_000;
+const HEAD_TIMEOUT_MS = 30_000;
 let inFlight = 0;
 const waiting = [];
 
-async function exists(src) {
+async function gated(fn) {
   if (inFlight >= PARALLEL) await new Promise(resolve => waiting.push(resolve));
   inFlight++;
   try {
-    return Boolean(await srcExists(src));
-  } catch {
-    return false;
+    return await fn();
   } finally {
     inFlight--;
     waiting.shift()?.();
@@ -92,16 +102,72 @@ async function exists(src) {
 /** A path worth asking the server about: not empty, not inline data. */
 const probeable = path => typeof path === "string" && path.length > 0 && !/^(data|blob):/i.test(path);
 
-/** path → Promise<boolean>: every answer the server gave this session, misses included. */
+const filePicker = () => foundry.applications?.apps?.FilePicker?.implementation ?? globalThis.FilePicker;
+
+/** "source:dir" → Promise<Set<string>|null>: each folder's files, or null where it cannot be listed. */
+const listings = new Map();
+
+function listing(source, dir) {
+  const key = `${source}:${dir}`;
+  let pending = listings.get(key);
+  if (!pending) {
+    const storages = game.data?.files?.storages;
+    const picker = filePicker();
+    pending =
+      !game.user?.isGM ||
+      typeof picker?.browse !== "function" ||
+      (Array.isArray(storages) && !storages.includes(source))
+        ? Promise.resolve(null)
+        : gated(() => picker.browse(source, dir)).then(
+            result => new Set((result?.files ?? []).map(f => samePath(String(f)))),
+            () => null
+          );
+    listings.set(key, pending);
+  }
+  return pending;
+}
+
+/** A HEAD request: `{ exists, definite }`, a network error or timeout being no answer. */
+function head(path) {
+  return gated(async () => {
+    try {
+      const response = await fetch(path, { method: "HEAD", signal: AbortSignal.timeout(HEAD_TIMEOUT_MS) });
+      if (response.status < 400 || response.type === "opaqueredirect") return { exists: true, definite: true };
+      return { exists: false, definite: [403, 404, 410].includes(response.status) };
+    } catch {
+      return { exists: false, definite: false };
+    }
+  });
+}
+
+async function probe(path) {
+  const target = browseTarget(path);
+  if (target) {
+    const files = await listing(target.source, target.dir);
+    if (files) return { exists: files.has(samePath(target.path)), definite: true };
+  }
+  return head(path);
+}
+
+/** path → Promise<boolean>: every definite answer this session, misses included. */
 const cache = new Map();
 
 function fileExists(path) {
   let pending = cache.get(path);
   if (!pending) {
-    pending = exists(path);
+    pending = probe(path).then(({ exists, definite }) => {
+      if (!definite) setTimeout(() => cache.get(path) === pending && cache.delete(path), RETRY_MS);
+      return exists;
+    });
     cache.set(path, pending);
   }
   return pending;
+}
+
+/** Forget every answer: new art uploaded, the separator changed. */
+function forgetProbes() {
+  cache.clear();
+  listings.clear();
 }
 
 /** Which of a base's three looks have a file: { ready, combat, dead }. */
@@ -112,18 +178,30 @@ async function looksAvailable(base) {
 }
 
 /**
- * A token's base. Its flags settle it when they recognise the image worn (the base itself or one
- * of its looks). Otherwise the image is adopted as the new base, with one exception: an image
- * whose name is a look of a base that exists on the server is that look of that base, so a token
- * handed a stored look back with no flags (dnd5e's revert of a transform does this) returns to
- * its base instead of making the look its base.
+ * The bases dnd5e's stash should hold instead of a look, `{ src?, subject? }`. A transform stores
+ * the token's image (and ring) in `flags.dnd5e.previousTokenData`, which the revert hands back
+ * with this module's flags gone; a look stored there would come back as a look nobody recognises.
+ * The flags recognise it while they still describe the stored image (the transform's own write,
+ * before this module adopts the form); a stash made before this module caught it (an older
+ * version, the module off at the time) is recognised by name, one probe confirming the base, and
+ * only on a token this module has dressed.
  */
-async function resolveBase(src, flags, sep) {
-  const known = baseOf({ src, flags }, sep);
-  if (known !== src || flags?.base === src) return known;
-  const candidate = lookCandidate(src, sep);
-  if (candidate && probeable(candidate.base) && (await fileExists(candidate.base))) return candidate.base;
-  return src;
+async function stashFix(tokenDoc, sep) {
+  const stash = (tokenDoc._source ?? tokenDoc).flags?.dnd5e?.previousTokenData;
+  if (!stash) return {};
+  const flags = tokenDoc.flags?.[MODULE_ID] ?? {};
+  const dressed = Object.keys(flags).length > 0;
+  const fix = async (stored, base, look) => {
+    if (!probeable(stored)) return null;
+    const known = stashedBase(stored, base, look, sep);
+    if (known) return known;
+    if (!dressed) return null;
+    const candidate = lookCandidate(stored, sep);
+    return candidate && probeable(candidate.base) && (await fileExists(candidate.base)) ? candidate.base : null;
+  };
+  const src = await fix(stash.texture?.src, flags.base, flags.look);
+  const subject = await fix(stash.ring?.subject?.texture, flags.subject, subjectLookOf(flags));
+  return { src, subject };
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -205,30 +283,36 @@ async function planFor(tokenDoc) {
   const { src, subject: ringSubject } = stored(tokenDoc);
   const flags = tokenDoc.flags?.[MODULE_ID] ?? {};
   if (!probeable(src)) return null;
-  const base = await resolveBase(src, flags, sep);
-  const available = await looksAvailable(base);
-  const look = winningLook(stateFor(tokenDoc), available, enabledLooks());
+  // The flags recognise the image worn (the base or one of its looks); anything else is the base,
+  // a look-shaped name included (a corpse prop wearing `goblin-dead.webp` on purpose).
+  const base = baseOf({ src, flags }, sep);
+  const state = stateFor(tokenDoc);
+  const enabled = enabledLooks();
+  const [available, stash] = await Promise.all([looksAvailable(base), stashFix(tokenDoc, sep)]);
+  const look = winningLook(state, available, enabled);
   const paths = lookPaths(base, sep);
 
-  // With the ring on and a subject image set, the subject gets the same suffix and both swap
-  // together, when the subject's look file exists; with no subject, Foundry draws it from
-  // `texture.src` and that alone is written.
+  // With the ring on and a subject image set, the subject takes the same suffix from its own
+  // files, falling through on its own (D2), since the subject is what Foundry draws; with no
+  // subject, Foundry draws the ring from `texture.src` and that alone is written.
   let subjectBase = null;
+  let subjectLook = null;
   let subjectLookSrc = null;
   if (ringSubject) {
-    // The subject's base is resolved as the image's is, the look-candidate probe included: dnd5e's
-    // revert of a transform hands the stored subject back with the flags gone, like the image.
-    subjectBase = await resolveBase(ringSubject, { base: flags.subject, look: flags.look }, sep);
-    if (look && probeable(subjectBase) && (await looksAvailable(subjectBase))[look]) {
-      subjectLookSrc = lookPaths(subjectBase, sep)[look];
+    subjectBase = baseOf({ src: ringSubject, flags: { base: flags.subject, look: subjectLookOf(flags) } }, sep);
+    if (probeable(subjectBase)) {
+      subjectLook = winningLook(state, await looksAvailable(subjectBase), enabled);
+      subjectLookSrc = subjectLook ? lookPaths(subjectBase, sep)[subjectLook] : null;
     }
   }
 
-  const update = tokenUpdate(
+  const dressing = tokenUpdate(
     { id: tokenDoc.id, src, subject: ringSubject, flags },
-    { base, look, lookSrc: look ? paths[look] : null, subjectBase, subjectLookSrc }
+    { base, look, lookSrc: look ? paths[look] : null, subjectBase, subjectLook, subjectLookSrc }
   );
-  if (!update) return null;
+  const stashed = stashUpdate(stash);
+  if (!dressing && !Object.keys(stashed).length) return null;
+  const update = { ...(dressing ?? { _id: tokenDoc.id }), ...stashed };
   return { update, note: { from: src, to: update["texture.src"] ?? src, look } };
 }
 
@@ -247,20 +331,25 @@ function applyTokens(tokens) {
 
 async function applyTokensNow(tokens) {
   if (!isActiveGM() || isPaused()) return 0;
+  // Every token planned at once; the probe gate limits the server traffic.
+  const live = tokens.filter(t => t?.parent);
+  const plans = await Promise.all(
+    live.map(t =>
+      planFor(t).catch(err => {
+        console.error(`${TITLE} | could not resolve the look of ${t.name}`, err);
+        return null;
+      })
+    )
+  );
   const byScene = new Map();
-  for (const t of tokens) {
-    if (!t?.parent) continue;
-    try {
-      const plan = await planFor(t);
-      if (!plan) continue;
-      const entry = byScene.get(t.parent) ?? { updates: [], notes: {} };
-      entry.updates.push(plan.update);
-      entry.notes[t.id] = plan.note;
-      byScene.set(t.parent, entry);
-    } catch (err) {
-      console.error(`${TITLE} | could not resolve the look of ${t.name}`, err);
-    }
-  }
+  live.forEach((t, i) => {
+    const plan = plans[i];
+    if (!plan) return;
+    const entry = byScene.get(t.parent) ?? { updates: [], notes: {} };
+    entry.updates.push(plan.update);
+    entry.notes[t.id] = plan.note;
+    byScene.set(t.parent, entry);
+  });
   let changed = 0;
   for (const [scene, { updates, notes }] of byScene) {
     // Planning awaits probes; the seat or the pause may have changed meanwhile (Restore All sets
@@ -291,6 +380,12 @@ async function applyTokensNow(tokens) {
  */
 let reconciling = null;
 let reconcileAgain = false;
+
+/** Every scene, the ones being looked at first: the viewed scene, then the active one. */
+function scenesByUse() {
+  const first = [game.scenes.viewed, game.scenes.active].filter(Boolean);
+  return [...new Set([...first, ...game.scenes])];
+}
 function reconcileAll() {
   if (reconciling) {
     reconcileAgain = true;
@@ -300,13 +395,70 @@ function reconcileAll() {
     let changed = 0;
     do {
       reconcileAgain = false;
-      for (const scene of game.scenes) changed += await applyTokens(scene.tokens.contents);
+      for (const scene of scenesByUse()) changed += await applyTokens(scene.tokens.contents);
     } while (reconcileAgain);
     return changed;
   })().finally(() => {
     reconciling = null;
   });
   return reconciling;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Restore All — asked for through a hidden world setting (`restore`, a timestamp), done by the
+ * active GM's client, answered through another (`restored`, `{ at, count }`)
+ * ------------------------------------------------------------------------------------------- */
+
+const RESTORE_WAIT_MS = 60_000;
+
+/** at → resolve: the pressing window's wait for its answer. */
+const restoreWaits = new Map();
+
+function awaitRestored(at) {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      restoreWaits.delete(at);
+      resolve(null);
+    }, RESTORE_WAIT_MS);
+    restoreWaits.set(at, count => {
+      clearTimeout(timer);
+      restoreWaits.delete(at);
+      resolve(count);
+    });
+  });
+}
+
+/**
+ * Every token back to its base, on the active GM's client: its batch in flight first finishes
+ * (and, paused now, writes nothing), then the tokens are read. A token whose look dnd5e stashed
+ * for a transform's revert gets the base put in the stash too, so the revert, after the module is
+ * gone, hands back the base.
+ */
+async function restoreHere(at) {
+  await chain;
+  const sep = separator();
+  let restored = 0;
+  for (const scene of game.scenes) {
+    const updates = [];
+    const notes = {};
+    for (const t of scene.tokens) {
+      const flags = t.flags?.[MODULE_ID] ?? {};
+      const { src, subjectSet } = stored(t);
+      const stashed = stashUpdate(await stashFix(t, sep));
+      const update = restoreUpdate({ id: t.id, src, subject: subjectSet, flags }, sep);
+      if (!update && !Object.keys(stashed).length) continue;
+      updates.push(forWrite({ ...(update ?? { _id: t.id }), ...stashed }));
+      notes[t.id] = { from: src, to: update?.["texture.src"] ?? src, look: null };
+    }
+    if (!updates.length) continue;
+    try {
+      await scene.updateEmbeddedDocuments("Token", updates, { tokenart: notes });
+      restored += updates.length;
+    } catch (err) {
+      console.error(`${TITLE} | could not restore tokens on ${scene.name}`, err);
+    }
+  }
+  await game.settings.set(MODULE_ID, S.restored, { at, count: restored });
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -321,7 +473,7 @@ const api = {
     const sep = separator();
     const flags = tokenDoc.flags?.[MODULE_ID] ?? {};
     const { src } = stored(tokenDoc);
-    const base = probeable(src) ? await resolveBase(src, flags, sep) : src;
+    const base = baseOf({ src, flags }, sep);
     const paths = lookPaths(base, sep);
     const available = probeable(base) ? await looksAvailable(base) : {};
     return {
@@ -350,7 +502,12 @@ const api = {
     ui.notifications.info(`${TITLE}: rescanning on every client.`);
   },
 
-  /** Every token back to its base, its flags gone: the step before the module is disabled. */
+  /**
+   * Every token back to its base, its flags gone: the step before the module is disabled. Any GM
+   * window may press it; the restore itself runs on the active GM's client, the one that writes
+   * the looks, after its own batch in flight has finished, so nothing it already sent lands after
+   * the restore read the tokens. Resolves with the count restored (0 when no answer came).
+   */
   async restoreAll({ confirm = false } = {}) {
     if (!game.user.isGM) {
       ui.notifications.warn(`${TITLE}: only a GM can restore tokens.`);
@@ -369,35 +526,19 @@ const api = {
       });
       if (!yes) return 0;
     }
-    await game.settings.set(MODULE_ID, S.paused, true);
-    // A batch this client had in flight finishes (and, paused now, writes nothing) before the
-    // tokens are read, so a look it landed a moment ago is seen and taken off.
-    await chain;
-    const sep = separator();
-    let restored = 0;
-    for (const scene of game.scenes) {
-      const updates = [];
-      const notes = {};
-      for (const t of scene.tokens) {
-        const flags = t.flags?.[MODULE_ID] ?? {};
-        const { src, subjectSet } = stored(t);
-        const update = restoreUpdate({ id: t.id, src, subject: subjectSet, flags }, sep);
-        if (!update) continue;
-        updates.push(forWrite(update));
-        notes[t.id] = { from: src, to: update["texture.src"] ?? src, look: null };
-      }
-      if (!updates.length) continue;
-      try {
-        await scene.updateEmbeddedDocuments("Token", updates, { tokenart: notes });
-        restored += updates.length;
-      } catch (err) {
-        console.error(`${TITLE} | could not restore tokens on ${scene.name}`, err);
-      }
+    const at = Date.now();
+    const answer = awaitRestored(at);
+    if (!isPaused()) await game.settings.set(MODULE_ID, S.paused, true);
+    await game.settings.set(MODULE_ID, S.restore, at);
+    const count = await answer;
+    if (count === null) {
+      ui.notifications.warn(`${TITLE}: the active GM's client did not answer the restore. Paused for this world.`);
+      return 0;
     }
     ui.notifications.info(
-      `${TITLE}: ${restored} token${restored === 1 ? "" : "s"} restored. Paused for this world: disable the module now, or press Rescan to resume.`
+      `${TITLE}: ${count} token${count === 1 ? "" : "s"} restored. Paused for this world: disable the module now, or press Rescan to resume.`
     );
-    return restored;
+    return count;
   }
 };
 
@@ -468,7 +609,7 @@ Hooks.once("init", () => {
     choices: { "-": "- (goblin-dead.webp)", _: "_ (goblin_dead.webp)", ".": ". (goblin.dead.webp)" },
     default: "-",
     onChange: () => {
-      cache.clear();
+      forgetProbes();
       if (isActiveGM()) void reconcileAll();
     }
   });
@@ -489,12 +630,32 @@ Hooks.once("init", () => {
     type: Number,
     default: 0,
     onChange: () => {
-      cache.clear();
+      forgetProbes();
       if (!isActiveGM() || isPaused()) return;
       void reconcileAll().then(changed =>
         ui.notifications.info(`${TITLE}: rescanned; ${changed} token${changed === 1 ? "" : "s"} changed.`)
       );
     }
+  });
+
+  // Hidden: Restore All's request (a timestamp); the active GM's client restores.
+  game.settings.register(MODULE_ID, S.restore, {
+    scope: "world",
+    config: false,
+    type: Number,
+    default: 0,
+    onChange: at => {
+      if (isActiveGM()) void restoreHere(Number(at));
+    }
+  });
+
+  // Hidden: the restore's answer, `{ at, count }`, for the window that pressed it.
+  game.settings.register(MODULE_ID, S.restored, {
+    scope: "world",
+    config: false,
+    type: Object,
+    default: {},
+    onChange: value => restoreWaits.get(Number(value?.at))?.(Number(value?.count) || 0)
   });
 
   game.settings.registerMenu(MODULE_ID, "rescanMenu", {
@@ -600,9 +761,17 @@ Hooks.on("updateToken", (doc, changed, options) => {
   }
   if (!isActiveGM() || isPaused()) return;
   // Anyone else's texture change is the new base (a Token Config edit, a transform, a summon's
-  // landing), unless it is one of the current base's own looks; re-resolve either way.
+  // landing), unless it is one of the current base's own looks; re-resolve either way. A stash
+  // dnd5e writes for a transform's revert is read too, its look swapped for the base.
   const has = key => foundry.utils.hasProperty(changed, key);
-  if (has("texture.src") || has("ring.enabled") || has("ring.subject.texture") || has("actorId") || has("actorLink")) {
+  if (
+    has("texture.src") ||
+    has("ring.enabled") ||
+    has("ring.subject.texture") ||
+    has("actorId") ||
+    has("actorLink") ||
+    has("flags.dnd5e.previousTokenData")
+  ) {
     void applyTokens([doc]);
   }
 });

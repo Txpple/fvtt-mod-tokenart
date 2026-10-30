@@ -25,10 +25,17 @@ export const SEPARATORS = Object.freeze(["-", "_", "."]);
 
 /**
  * The flag scope the module writes on a token: `base` (the path to return to), `look` (the one
- * worn now, absent at base) and `subject` (the dynamic ring subject's base, when the token has
- * one). Nothing is written on the actor or the prototype token.
+ * worn now, absent at base), `subject` (the dynamic ring subject's base, when the token has one)
+ * and `subjectLook` (the subject's look, only when it differs from the image's). Nothing is
+ * written on the actor or the prototype token.
  */
 export const FLAG_SCOPE = "fvtt-mod-tokenart";
+
+/**
+ * The top folders Foundry serves from its own public directory, not the user data (Foundry's
+ * FilePicker reads a path's first folder the same way to pick its source).
+ */
+export const PUBLIC_DIRS = Object.freeze(["cards", "css", "fonts", "icons", "lang", "scripts", "sounds", "ui"]);
 
 /**
  * A path in three parts: everything up to the extension, the extension with its dot, and the
@@ -88,9 +95,9 @@ export function isLookOf(path, base, separator = "-") {
  * The base and look a path would be the look of, by its name alone: `t/goblin-dead.webp` →
  * `{ base: "t/goblin.webp", look: "dead" }`; null when the name ends in no look suffix. A name
  * alone proves nothing (`walking-dead.webp` may be a base), so the caller asks the server whether
- * the candidate base exists before believing it; that is the one place a base is read out of a
- * look's name, for a token that wears a look with no record of its base (a module that stored the
- * image and handed it back, dnd5e's revert of a transform among them).
+ * the candidate base exists before believing it. Never used to adopt a token's base (a token
+ * wearing `goblin-dead.webp` with no record is a corpse prop, worn on purpose); only for a
+ * wildcard's list and for a look dnd5e stored before this module could catch it.
  * @param {unknown} path
  * @param {string} [separator]
  * @returns {{ base: string, look: string }|null}
@@ -206,11 +213,19 @@ export function lookCandidatesOutside(paths, separator = "-") {
 }
 
 /**
+ * @typedef {object} TokenFlags
+ * @property {string} [base]          the image's base
+ * @property {string} [look]          the image's look, absent at base
+ * @property {string} [subject]       the ring subject's base
+ * @property {string} [subjectLook]   the subject's look, only when it differs from the image's
+ */
+
+/**
  * @typedef {object} TokenNow
  * @property {string} id
  * @property {string} src                      the image the token wears
  * @property {string|null} [subject]           the ring subject's image when the ring is on and one is set, else null
- * @property {{ base?: string, look?: string, subject?: string }} [flags]   this module's flags on the token
+ * @property {TokenFlags} [flags]              this module's flags on the token
  */
 
 /**
@@ -219,14 +234,24 @@ export function lookCandidatesOutside(paths, separator = "-") {
  * @property {string|null} look                the look to wear, null for the base
  * @property {string|null} [lookSrc]           that look's file
  * @property {string|null} [subjectBase]       the ring subject's base, when the token has one
+ * @property {string|null} [subjectLook]       the subject's own look (its files fall through on their own); the image's look when absent
  * @property {string|null} [subjectLookSrc]    the subject's file for that look, when it exists
  */
+
+/**
+ * The look the ring subject was last given: its own flag when it differs from the image's, else the
+ * image's.
+ * @param {TokenFlags|undefined} flags
+ * @returns {string|undefined}
+ */
+export const subjectLookOf = flags => flags?.subjectLook ?? flags?.look;
 
 /**
  * The update a token needs, with flat keys (a nested `texture` object left the prepared texture
  * stale on 14.369), or null when it already wears the right image with the right flags. A token
  * at its base that this module never touched gets nothing written; one it did keeps its `base`
- * flag and loses `look`.
+ * flag and loses `look`. The ring subject chooses its look from its own files (D2 for the subject
+ * as for the image), so the two may wear different looks; `subjectLook` is stored only then.
  * @param {TokenNow} current
  * @param {TokenTarget} target
  * @returns {Record<string, unknown>|null}
@@ -234,18 +259,26 @@ export function lookCandidatesOutside(paths, separator = "-") {
 export function tokenUpdate(current, target) {
   const { id, src, subject = null, flags = {} } = current;
   const { base, look, lookSrc = null, subjectBase = null, subjectLookSrc = null } = target;
+  const subjectLook = target.subjectLook === undefined ? look : target.subjectLook;
   const wantSrc = look ? (lookSrc ?? base) : base;
-  const wantSubject =
-    subject == null || subjectBase == null ? null : look && subjectLookSrc ? subjectLookSrc : subjectBase;
-  const touched = flags.base !== undefined || flags.look !== undefined || flags.subject !== undefined;
+  const hasSubject = subject != null && subjectBase != null;
+  const worn = hasSubject && subjectLook && subjectLookSrc ? subjectLook : null;
+  const wantSubject = hasSubject ? (worn ? subjectLookSrc : subjectBase) : null;
+  const wantSubjectLook = worn && worn !== look ? worn : undefined;
+  const touched =
+    flags.base !== undefined ||
+    flags.look !== undefined ||
+    flags.subject !== undefined ||
+    flags.subjectLook !== undefined;
   /** @type {Record<string, unknown>} */
   const u = {};
   if (src !== wantSrc) u["texture.src"] = wantSrc;
   if (wantSubject != null && subject !== wantSubject) u["ring.subject.texture"] = wantSubject;
-  if (look) {
+  if (look || worn) {
     if (flags.base !== base) u[`flags.${FLAG_SCOPE}.base`] = base;
-    if (flags.look !== look) u[`flags.${FLAG_SCOPE}.look`] = look;
-    if (subjectBase != null && flags.subject !== subjectBase) u[`flags.${FLAG_SCOPE}.subject`] = subjectBase;
+    if (look && flags.look !== look) u[`flags.${FLAG_SCOPE}.look`] = look;
+    if (!look && flags.look !== undefined) u[`flags.${FLAG_SCOPE}.-=look`] = null;
+    if (hasSubject && flags.subject !== subjectBase) u[`flags.${FLAG_SCOPE}.subject`] = subjectBase;
   } else if (touched) {
     if (flags.base !== undefined && flags.base !== base) u[`flags.${FLAG_SCOPE}.base`] = base;
     if (flags.look !== undefined) u[`flags.${FLAG_SCOPE}.-=look`] = null;
@@ -253,8 +286,78 @@ export function tokenUpdate(current, target) {
       u[`flags.${FLAG_SCOPE}.subject`] = subjectBase;
     }
   }
+  if (wantSubjectLook && flags.subjectLook !== wantSubjectLook) u[`flags.${FLAG_SCOPE}.subjectLook`] = wantSubjectLook;
+  if (!wantSubjectLook && flags.subjectLook !== undefined) u[`flags.${FLAG_SCOPE}.-=subjectLook`] = null;
   if (!Object.keys(u).length) return null;
   return { _id: id, ...u };
+}
+
+/**
+ * The base a stored image goes back to, or null: dnd5e's transform stores the token's image in
+ * `flags.dnd5e.previousTokenData` and its revert hands that back, so a look stored there would come
+ * back as a look with the flags gone. The stored image is that base's when it is the base or one of
+ * its looks (under the flags' look and every separator, as `baseOf` reads the token itself).
+ * @param {unknown} stored   the stored image
+ * @param {string|undefined} base   the base the flags record
+ * @param {string|undefined} look   the look the flags record
+ * @param {string} [separator]
+ * @returns {string|null}
+ */
+export function stashedBase(stored, base, look, separator = "-") {
+  if (typeof stored !== "string" || !stored || !base || stored === base) return null;
+  return baseOf({ src: stored, flags: { base, look } }, separator) === base ? base : null;
+}
+
+/** Where dnd5e keeps the image its revert hands back, and the ring subject's. */
+export const STASH_KEYS = Object.freeze({
+  src: "flags.dnd5e.previousTokenData.texture.src",
+  subject: "flags.dnd5e.previousTokenData.ring.subject.texture"
+});
+
+/**
+ * The keys that put a base where dnd5e stored a look.
+ * @param {{ src?: string|null, subject?: string|null }} fix   the base for each stored image that needs one
+ * @returns {Record<string, string>}
+ */
+export function stashUpdate({ src = null, subject = null }) {
+  /** @type {Record<string, string>} */
+  const u = {};
+  if (src) u[STASH_KEYS.src] = src;
+  if (subject) u[STASH_KEYS.subject] = subject;
+  return u;
+}
+
+/**
+ * Where to list a path's folder through Foundry's file browser, or null when it cannot be listed
+ * that way (a URL, a query string, inline data): `worlds/w/t/goblin.webp` → the `data` source's
+ * `worlds/w/t`; `icons/svg/mystery-man.svg` → the `public` source's `icons/svg`. `path` is the
+ * form the listing's entries are compared in (no leading slash).
+ * @param {unknown} path
+ * @returns {{ source: string, dir: string, path: string }|null}
+ */
+export function browseTarget(path) {
+  if (typeof path !== "string" || !path) return null;
+  if (/[?#]/.test(path) || /^[a-z][a-z0-9+.-]*:/i.test(path)) return null;
+  const p = path.replace(/^(\.\/|\/)+/, "");
+  const parts = p.split("/");
+  const name = parts.pop();
+  if (!name || parts.some(s => s === "..")) return null;
+  const source = PUBLIC_DIRS.includes(parts[0] ?? "") ? "public" : "data";
+  return { source, dir: parts.join("/"), path: p };
+}
+
+/**
+ * A path as a listing and a token both mean it: Foundry's file browser answers with encoded paths
+ * (`my%20goblin.webp`), a token may store either form.
+ * @param {string} path
+ * @returns {string}
+ */
+export function samePath(path) {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
 }
 
 /**
@@ -306,7 +409,14 @@ export function withDeletionOperators(update, makeDeletion) {
  * @returns {Record<string, unknown>|null}
  */
 export function restoreUpdate({ id, src, subject = null, flags = {} }, separator = "-") {
-  if (flags.base === undefined && flags.look === undefined && flags.subject === undefined) return null;
+  if (
+    flags.base === undefined &&
+    flags.look === undefined &&
+    flags.subject === undefined &&
+    flags.subjectLook === undefined
+  ) {
+    return null;
+  }
   /** @type {Record<string, unknown>} */
   const u = {};
   if (flags.base && src !== flags.base && baseOf({ src, flags }, separator) === flags.base) {
@@ -316,7 +426,7 @@ export function restoreUpdate({ id, src, subject = null, flags = {} }, separator
     subject != null &&
     flags.subject &&
     subject !== flags.subject &&
-    baseOf({ src: subject, flags: { base: flags.subject, look: flags.look } }, separator) === flags.subject
+    baseOf({ src: subject, flags: { base: flags.subject, look: subjectLookOf(flags) } }, separator) === flags.subject
   ) {
     u["ring.subject.texture"] = flags.subject;
   }

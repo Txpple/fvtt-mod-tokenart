@@ -4,16 +4,22 @@ import {
   LOOKS,
   PRECEDENCE,
   applicable,
+  STASH_KEYS,
   baseOf,
+  browseTarget,
   isLookOf,
   lookCandidate,
   lookCandidatesOutside,
   lookPath,
   lookPaths,
   restoreUpdate,
+  samePath,
   splitPath,
+  stashUpdate,
+  stashedBase,
   stateOf,
   stillCurrent,
+  subjectLookOf,
   tokenUpdate,
   winningLook,
   withDeletionOperators,
@@ -539,5 +545,175 @@ describe("withDeletionOperators — Foundry 14's deletion operators for the lega
     let n = 0;
     const out = withDeletionOperators({ "a.-=x": null, "b.-=y": null, "c-=d": null, "-=e": 1 }, () => ++n);
     expect(out).toEqual({ "a.x": 1, "b.y": 2, "c-=d": null, "-=e": 1 });
+  });
+});
+
+describe("the ring subject falls through on its own (D2 for the subject, #2)", () => {
+  const B = "t/goblin.webp";
+  const SB = "t/goblin-subject.webp";
+  const flag = key => `flags.${FLAG_SCOPE}.${key}`;
+
+  it("the image dead, the subject with no dead file: the subject wears its own combat look", () => {
+    expect(
+      tokenUpdate(
+        { id: "a", src: B, subject: SB, flags: {} },
+        {
+          base: B,
+          look: "dead",
+          lookSrc: "t/goblin-dead.webp",
+          subjectBase: SB,
+          subjectLook: "combat",
+          subjectLookSrc: "t/goblin-subject-combat.webp"
+        }
+      )
+    ).toEqual({
+      _id: "a",
+      "texture.src": "t/goblin-dead.webp",
+      "ring.subject.texture": "t/goblin-subject-combat.webp",
+      [flag("base")]: B,
+      [flag("look")]: "dead",
+      [flag("subject")]: SB,
+      [flag("subjectLook")]: "combat"
+    });
+  });
+  it("the image at its base, the subject with a look: the flags still record both bases", () => {
+    expect(
+      tokenUpdate(
+        { id: "a", src: B, subject: SB, flags: {} },
+        { base: B, look: null, subjectBase: SB, subjectLook: "ready", subjectLookSrc: "t/goblin-subject-ready.webp" }
+      )
+    ).toEqual({
+      _id: "a",
+      "ring.subject.texture": "t/goblin-subject-ready.webp",
+      [flag("base")]: B,
+      [flag("subject")]: SB,
+      [flag("subjectLook")]: "ready"
+    });
+  });
+  it("the subject's look the same as the image's: no subjectLook flag", () => {
+    const u = tokenUpdate(
+      { id: "a", src: B, subject: SB, flags: {} },
+      {
+        base: B,
+        look: "dead",
+        lookSrc: "t/goblin-dead.webp",
+        subjectBase: SB,
+        subjectLook: "dead",
+        subjectLookSrc: "t/goblin-subject-dead.webp"
+      }
+    );
+    expect(u?.[flag("subjectLook")]).toBeUndefined();
+  });
+  it("the subject catching up with the image: its subjectLook flag goes", () => {
+    expect(
+      tokenUpdate(
+        {
+          id: "a",
+          src: "t/goblin-dead.webp",
+          subject: "t/goblin-subject-combat.webp",
+          flags: { base: B, look: "dead", subject: SB, subjectLook: "combat" }
+        },
+        {
+          base: B,
+          look: "dead",
+          lookSrc: "t/goblin-dead.webp",
+          subjectBase: SB,
+          subjectLook: "dead",
+          subjectLookSrc: "t/goblin-subject-dead.webp"
+        }
+      )
+    ).toEqual({ _id: "a", "ring.subject.texture": "t/goblin-subject-dead.webp", [flag("-=subjectLook")]: null });
+  });
+  it("both back at base: the look flags go, the bases stay", () => {
+    expect(
+      tokenUpdate(
+        {
+          id: "a",
+          src: B,
+          subject: "t/goblin-subject-ready.webp",
+          flags: { base: B, subject: SB, subjectLook: "ready" }
+        },
+        { base: B, look: null, subjectBase: SB, subjectLook: null }
+      )
+    ).toEqual({ _id: "a", "ring.subject.texture": SB, [flag("-=subjectLook")]: null });
+  });
+  it("subjectLookOf reads the subject's own flag, else the image's", () => {
+    expect(subjectLookOf({ look: "dead", subjectLook: "combat" })).toBe("combat");
+    expect(subjectLookOf({ look: "dead" })).toBe("dead");
+    expect(subjectLookOf(undefined)).toBeUndefined();
+  });
+  it("Restore All recognises a subject wearing its own look", () => {
+    expect(
+      restoreUpdate({
+        id: "a",
+        src: "t/goblin-dead.webp",
+        subject: "t/goblin-subject-combat.webp",
+        flags: { base: B, look: "dead", subject: SB, subjectLook: "combat" }
+      })
+    ).toEqual({ _id: "a", "texture.src": B, "ring.subject.texture": SB, [`flags.-=${FLAG_SCOPE}`]: null });
+  });
+});
+
+describe("stashedBase / stashUpdate — a look dnd5e stored for a transform's revert (#1, #3)", () => {
+  const B = "t/druid.webp";
+
+  it("a look of the recorded base stored: the base goes in its place", () => {
+    expect(stashedBase("t/druid-ready.webp", B, "ready")).toBe(B);
+  });
+  it("the look the flags name under another separator: still the base", () => {
+    expect(stashedBase("t/druid_dead.webp", B, "dead")).toBe(B);
+  });
+  it("the base itself stored, or nothing recorded: nothing to fix", () => {
+    expect(stashedBase(B, B, "ready")).toBeNull();
+    expect(stashedBase("t/druid-ready.webp", undefined, undefined)).toBeNull();
+    expect(stashedBase(null, B, "ready")).toBeNull();
+  });
+  it("an image that is no look of the base (the form's own art): nothing to fix", () => {
+    expect(stashedBase("t/wolf-ready.webp", B, "ready")).toBeNull();
+  });
+  it("stashUpdate writes only the stored images that need it", () => {
+    expect(stashUpdate({ src: B, subject: null })).toEqual({ [STASH_KEYS.src]: B });
+    expect(stashUpdate({ subject: "t/s.webp" })).toEqual({ [STASH_KEYS.subject]: "t/s.webp" });
+    expect(stashUpdate({})).toEqual({});
+  });
+  it("the stash keys are dnd5e's", () => {
+    expect(STASH_KEYS).toEqual({
+      src: "flags.dnd5e.previousTokenData.texture.src",
+      subject: "flags.dnd5e.previousTokenData.ring.subject.texture"
+    });
+  });
+});
+
+describe("browseTarget / samePath — a folder listing instead of a HEAD per file (#5)", () => {
+  it("a world asset: the data source, its folder", () => {
+    expect(browseTarget("worlds/w/assets/tokens/goblin.webp")).toEqual({
+      source: "data",
+      dir: "worlds/w/assets/tokens",
+      path: "worlds/w/assets/tokens/goblin.webp"
+    });
+  });
+  it("a core icon: the public source", () => {
+    expect(browseTarget("icons/svg/mystery-man.svg")).toEqual({
+      source: "public",
+      dir: "icons/svg",
+      path: "icons/svg/mystery-man.svg"
+    });
+  });
+  it("a leading slash is dropped, a file at the root lists the root", () => {
+    expect(browseTarget("/modules/m/t.webp")?.path).toBe("modules/m/t.webp");
+    expect(browseTarget("goblin.webp")).toEqual({ source: "data", dir: "", path: "goblin.webp" });
+  });
+  it("URLs, query strings, inline data and parent folders are left to a HEAD", () => {
+    expect(browseTarget("https://assets.forge-vtt.com/x/goblin.webp")).toBeNull();
+    expect(browseTarget("worlds/w/goblin.webp?v=2")).toBeNull();
+    expect(browseTarget("data:image/png;base64,AAAA")).toBeNull();
+    expect(browseTarget("worlds/../goblin.webp")).toBeNull();
+    expect(browseTarget("")).toBeNull();
+    expect(browseTarget(undefined)).toBeNull();
+  });
+  it("samePath reads an encoded and a plain path alike, and leaves a broken escape as it is", () => {
+    expect(samePath("t/my%20goblin.webp")).toBe("t/my goblin.webp");
+    expect(samePath("t/my goblin.webp")).toBe("t/my goblin.webp");
+    expect(samePath("t/100%.webp")).toBe("t/100%.webp");
   });
 });

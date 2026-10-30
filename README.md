@@ -13,9 +13,10 @@ simply skipped, and the base art is the floor.
 - **The looks sit beside the base**, the same name with a suffix before the extension, in the same
   folder: `goblin-ready.webp`, `goblin-combat.webp`, `goblin-dead.webp`. No subfolders, no table,
   no folder scan.
-- **The GM's client does the swapping.** Once per image, it asks the server which of the three
-  files exist, then changes the token's image as the state changes. Players' clients see the
-  swaps and do nothing else.
+- **The GM's client does the swapping.** It lists each art folder once through Foundry's file
+  browser to learn which looks exist (a URL it cannot list, on the Forge or S3, is asked with one
+  request per file instead), then changes the token's image as the state changes. Players' clients
+  see the swaps and do nothing else.
 - **Every scene follows**, viewed or not: the module watches the documents, not the canvas, so a
   character at 0 Hit Points is dead on the scene nobody is looking at too.
 - **A missing look falls through.** A combatant with a `-ready` file and no `-combat` file keeps
@@ -67,17 +68,21 @@ assets/tokens/
   of a look's name in one case only, below, and only when that base file exists.
 - **Any image change by anyone else becomes the new base:** a Token Config edit, a dnd5e
   transform, By the Books' Wild Shape Art and Summon Art, the dnd5e MCP's `set-actor-art`. The
-  looks are re-derived from it. Two exceptions, both so a stored image handed back stays a look: a
-  change that lands on one of the current base's own look files is recognised as that look; and a
-  token found wearing a look-shaped name with no record of its base (dnd5e's revert of a transform
-  hands the stored image back and drops the flags) is taken as that look when the base file exists
-  beside it, so `giant-owl-ready.webp` returns to `giant-owl.webp` instead of becoming a base of
-  its own. A `walking-dead.webp` beside no `walking.webp` is still a base.
+  looks are re-derived from it. A change that lands on one of the current base's own look files is
+  recognised as that look.
+- **A token placed wearing a look file is a base of its own:** a corpse prop set to
+  `goblin-dead.webp` beside `goblin.webp` keeps the dead art, its looks being
+  `goblin-dead-ready.webp` and so on.
+- **Transforms hand back the base.** dnd5e's transform stores the token's image for the revert, and
+  the revert drops this module's flags; when the stored image is a look, the module puts its base
+  there instead, so a druid reverting from Wild Shape gets its own base back and its looks follow
+  (Restore All does the same, so a revert after the module is gone hands back the base too).
 - **Wildcard tokens** (`goblin-*.webp`) never draw a look file: the module filters them out of the
   wildcard list, so `goblin-1-dead.webp` is left alone while `goblin-1.webp` is in it.
-- **Dynamic rings.** With the ring on and its own subject image set, the subject gets the same
-  suffix and both swap together when the subject's look file exists. With no subject image, Foundry
-  draws the ring from the token image, which is the only thing written.
+- **Dynamic rings.** With the ring on and its own subject image set, the subject takes the same
+  suffix from its own files and falls through on its own: a subject with no `-dead` file wears its
+  `-combat` or `-ready` look, whatever the token image wears. With no subject image, Foundry draws
+  the ring from the token image, which is the only thing written.
 - **Video textures** (`.webm`) follow the same rule, and a query string (a Forge or S3 URL) is kept
   after the extension.
 - **New art uploaded mid-session:** press **Rescan** in the settings, from any GM window (or
@@ -94,7 +99,7 @@ assets/tokens/
 | Dead look | On | Wears the `-dead` image at 0 Hit Points or with the Dead condition. |
 | Suffix separator | `-` | The character before the look word: `goblin-dead.webp`, `goblin_dead.webp` or `goblin.dead.webp`. |
 | Rescan token art | | Forgets which files were found and looks again, from any GM window; also resumes after Restore All. |
-| Restore every token to its base | | Puts every token back to its base image and forgets the looks; the step before disabling or uninstalling the module. Token Art then stays paused for the world, on every client, until Rescan is pressed. |
+| Restore every token to its base | | Puts every token back to its base image and forgets the looks; the step before disabling or uninstalling the module. Pressed in any GM window, it runs on the active GM's client. Token Art then stays paused for the world, on every client, until Rescan is pressed. |
 
 ## Playing with the family
 
@@ -127,9 +132,11 @@ Hooks.on("tokenart.changed", (tokenDoc, { from, to, look }) => {
 });
 ```
 
-Two flags on the token, both the module's: `flags.fvtt-mod-tokenart.base` (the path to return to)
-and `flags.fvtt-mod-tokenart.look` (the one worn now, absent at base). Nothing is written on the
-actor or the prototype token.
+The flags on the token, all the module's: `flags.fvtt-mod-tokenart.base` (the path to return to),
+`look` (the one worn now, absent at base), and with a ring subject `subject` (its base) and
+`subjectLook` (its look, only when it differs from the image's). The one write outside them is a
+base put in place of a look in dnd5e's transform stash (`flags.dnd5e.previousTokenData`). Nothing is
+written on the actor or the prototype token.
 
 ## Development
 
