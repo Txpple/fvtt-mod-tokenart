@@ -167,6 +167,7 @@ table from the fog of war to the loot. The other modules:
 - [Open Roll 5e: Area Sounds](https://github.com/Txpple/fvtt-mod-areasounds): background sound for scenes: random one-shots with silence between them, seamless crossfaded loops, day and night gating, and quiet during combat.
 - [Open Roll 5e: Clue Board](https://github.com/Txpple/fvtt-mod-clueboard): keeps the party's Mysteries: every clue the GM hands them, stamped with where it was found and who has read it, sorted into the questions the party names.
 - [Open Roll 5e: Card Catalogue](https://github.com/Txpple/fvtt-mod-cardcatalogue): turns every directory the table uses into a case of cards: the journal, the scenes, the actors and the items, each found by any word with its main action a click away, and a sidebar that shows only the tabs the table uses.
+- [Open Roll 5e: Crystal Ball](https://github.com/Txpple/fvtt-mod-crystalball): a crystal ball on the sidebar: a player asks a Claude model about the game as their character knows it, the journal they can read, their sheet, their party and its clues, answered by a service beside the server, never from a client.
 
 Three MCP servers for [Claude Code](https://claude.com/claude-code) complete the suite:
 
